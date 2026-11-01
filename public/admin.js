@@ -356,7 +356,7 @@
     strands: 'Theme, a spangram that stretches across the board, and the theme words. Total letters must be exactly <b>48</b>. The grid is generated for you — press Save again for a fresh layout.',
     krillion: 'Each prompt starts with <b>?</b>. List accepted answers by rarity: <b>surface</b> (common), <b>deep</b> (rare, earns time back), <b>abyss</b> (very rare, earns more). Small typos are forgiven.',
     rapid: 'One question per line, accepted answers after <b>|</b>, separated by <b>/</b>. Small typos are forgiven.',
-    melale: 'A Poople-style word ladder. Set the <b>Target</b>, then one starting word per line (each line is a stage), with an optional label after <b>|</b>. Starting words can be made-up letters, but each move changes one letter and must be a real word. Par (the shortest ladder) is worked out for you; every step over par adds time.',
+    melale: 'A Poople-style word ladder. Set the <b>Target</b>, then one starting word per line (each line is a stage), with an optional label after <b>|</b>. Use <b>&gt;</b> to show fixed opening rows (e.g. <b>FMAC &gt; FACE</b>) — players start from the last one. Starting words can be made-up letters, but each move changes one letter and must be a real word. Par (the shortest ladder) is worked out for you; every step over par adds time.',
   };
   async function renderPuzzles(stage) {
     if (mountedView === 'puzzles') return;
@@ -378,7 +378,7 @@
         <div class="pv-grid" style="grid-template-columns:repeat(${c.grid.cols},1fr);max-width:300px">${c.grid.letters.map((L, i) => `<span style="background:${color[i]};color:#111">${L}</span>`).join('')}</div>`;
     }
     if (game === 'krillion') return `<div class="pv-list">${c.prompts.map(p => `<div><b>${esc(p.prompt)}</b><br><small>${p.tiers.surface.length} surface · ${p.tiers.deep.length} deep · ${p.tiers.abyss.length} abyss</small></div>`).join('')}</div>`;
-    if (game === 'melale') return `<div class="pv-list">${c.ladders.map(l => `<div><b>${esc(l.start)}</b> → ${esc(c.target)} · par ${l.par}${l.label ? ` · <small>${esc(l.label)}</small>` : ''}<br><small>e.g. ${esc(l.path.join(' → '))}</small></div>`).join('')}</div>`;
+    if (game === 'melale') return `<div class="pv-list">${c.ladders.map(l => `<div><b>${esc((l.given || [l.start]).join(' › '))}</b> → ${esc(c.target)} · par ${l.par}${l.label ? ` · <small>${esc(l.label)}</small>` : ''}<br><small>e.g. ${esc(l.path.join(' → '))}</small></div>`).join('')}</div>`;
     if (game === 'rapid') return `<div class="pv-list">${c.questions.map((q, i) => `<div><small>${i + 1}.</small> ${esc(q.q)}<br><small>→ ${esc(q.answers.join(' / '))}</small></div>`).join('')}</div>`;
   }
   function drawEditor() {

@@ -361,7 +361,8 @@
       const v = this.v, el = this.el; if (!v.start) return;
       const T = v.target, n = T.length;
       el.querySelector('#ml-n').textContent = `Stage ${v.index + 1} of ${v.total}${v.label ? ' · ' + v.label : ''}`;
-      const steps = v.chain.length - 1;
+      const gc = v.givenCount || 1;
+      const steps = v.chain.length - gc;
       el.querySelector('#ml-par').innerHTML = `Steps <b>${steps}</b> · Par <b>${v.par}</b>`;
       const cells = (w, prev, cls) => `<div class="ml-row ${cls || ''}">${[...w.padEnd(n)].map((ch, i) => {
         const c = [];
@@ -370,13 +371,13 @@
         return `<div class="ml-cell ${c.join(' ')}">${ch === ' ' ? '' : ch}</div>`;
       }).join('')}</div>`;
       const last = v.chain[v.chain.length - 1];
-      let html = v.chain.map((w, i) => cells(w, i ? v.chain[i - 1] : null, i === 0 ? 'start' : '')).join('');
+      let html = v.chain.map((w, i) => cells(w, i >= gc ? v.chain[i - 1] : null, i < gc ? 'start' : '')).join('');
       html += `<div class="ml-row input">${Array.from({ length: n }, (_, i) => this.typed[i] ? `<div class="ml-cell typed ${this.typed[i] !== last[i] ? 'chg' : ''}">${this.typed[i]}</div>` : `<div class="ml-cell ghost">${last[i]}</div>`).join('')}</div>`;
       html += `<div class="ml-goal-label">Goal</div>` + cells(T, null, 'goal');
       const board = el.querySelector('#ml-board');
       board.innerHTML = html;
       board.scrollTop = board.scrollHeight;
-      el.querySelector('#ml-undo').disabled = v.chain.length < 2;
+      el.querySelector('#ml-undo').disabled = v.chain.length <= gc;
       el.querySelector('#ml-hint').textContent = `Hint +${v.hintPenalty}s`;
     },
   };
