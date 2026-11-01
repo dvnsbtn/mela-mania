@@ -46,7 +46,7 @@ Typical flow: Join screen → Rounds → Start round → (Live view) → round e
 
 Each round's time = seconds from round start to finishing + penalties − bonuses. Totals are summed across rounds.
 
-Rapid Fire is a host-paced buzzer round instead: you press **Next question**, the first team to buzz answers, and their result is added to (or taken off) their total. If the auto-check marks a fair answer wrong, press **Accept last answer as correct**.
+Rapid Fire is a host-paced buzzer round instead: you press **Next question** (N), the first team to buzz says its answer out loud, and you press **Correct** (C) or **Wrong** (W). The 15s countdown is only a guide. If you mark a fair answer wrong by mistake, press **Undo: mark last wrong as correct**. **Show answer key** puts the accepted answers on your console, so only turn it on where the audience can't see it.
 
 | Situation | Effect (editable in Settings) |
 |---|---|
@@ -56,7 +56,7 @@ Rapid Fire is a host-paced buzzer round instead: you press **Next question**, th
 | Krillion: skip or 30s prompt timeout | +10s |
 | Krillion: rare ("deep") / very rare ("abyss") answer | −5s / −10s |
 | Rapid Fire (buzzer): right answer | −60s |
-| Rapid Fire (buzzer): wrong answer or no answer in 15s | +10s for that team, −10s for every other team |
+| Rapid Fire (buzzer): wrong answer (host's call) | +10s for that team, −10s for every other team |
 
 ## Changing puzzles
 
