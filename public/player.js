@@ -332,11 +332,10 @@
       el.innerHTML = `
         <div class="sub"><span id="ml-n"></span><span id="ml-par"></span></div>
         <div class="ml-board" id="ml-board"></div>
-        <div class="row-btns"><button class="btn ghost small" id="ml-undo">Undo</button><button class="btn ghost small" id="ml-hint">Hint</button></div>
+        <div class="row-btns"><button class="btn ghost small" id="ml-undo">Undo</button></div>
         <div class="wd-kbd" id="ml-kbd">${rows.map(r => `<div class="r">${r.split('').map(c => c === '+' ? '<button class="wide" data-k="Enter">ENTER</button>' : c === '-' ? '<button class="wide" data-k="Backspace">⌫</button>' : `<button data-k="${c}">${c}</button>`).join('')}</div>`).join('')}</div>`;
       el.querySelector('#ml-kbd').addEventListener('click', e => { const b = e.target.closest('button'); if (b) this.key(b.dataset.k); });
       el.querySelector('#ml-undo').onclick = async () => { this.typed = ''; const r = await act({ type: 'undo' }); if (r.msg) toast(r.msg, r.tone); };
-      el.querySelector('#ml-hint').onclick = async () => { this.typed = ''; const r = await act({ type: 'hint' }); if (r.msg) toast(r.msg, r.tone || 'good'); };
       this.keyHandler = e => { if (e.metaKey || e.ctrlKey || (e.target && e.target.tagName === 'INPUT')) return; if (e.key === 'Enter' || e.key === 'Backspace' || /^[a-z]$/i.test(e.key)) { e.preventDefault(); this.key(e.key.length === 1 ? e.key.toUpperCase() : e.key); } };
       document.addEventListener('keydown', this.keyHandler);
     },
@@ -381,7 +380,6 @@
       board.innerHTML = html;
       board.scrollTop = board.scrollHeight;
       el.querySelector('#ml-undo').disabled = v.chain.length <= gc;
-      el.querySelector('#ml-hint').textContent = `Hint +${v.hintPenalty}s`;
     },
   };
 

@@ -427,7 +427,7 @@
     strands: 'Theme, a spangram that stretches across the board, and the theme words. Total letters must be exactly <b>48</b>. The grid is generated for you — press Save again for a fresh layout.',
     krillion: 'Each prompt starts with <b>?</b>. List accepted answers by rarity: <b>surface</b> (common), <b>deep</b> (rare, earns time back), <b>abyss</b> (very rare, earns more). Small typos are forgiven.',
     rapid: 'Buzzer round. One question per line, accepted answers after <b>|</b>, separated by <b>/</b>. Small typos are forgiven, and you can overrule a wrong call live. The first answer listed is the one shown when a question closes.',
-    melale: 'A Poople-style word ladder. Set the <b>Target</b>, then one starting word per line (each line is a stage), with an optional label after <b>|</b>. Use <b>&gt;</b> to show fixed opening rows (e.g. <b>FMAC &gt; FACE</b>) — players start from the last one. Starting words can be made-up letters, but each move changes one letter and must be a real word. Par (the shortest ladder) is worked out for you; every step over par adds time.',
+    melale: 'A Poople-style word ladder. Set the <b>Target</b>, then one starting word per line (each line is a stage), with an optional label after <b>|</b>. Use <b>&gt;</b> to show fixed opening rows (e.g. <b>FMAC &gt; FACE</b>) — players start from the last one. Starting words can be made-up letters, but each move changes one letter and must be a real word. Par (the shortest ladder) is worked out for you; every step over par adds time. There are no hints.',
   };
   async function renderPuzzles(stage) {
     if (mountedView === 'puzzles') return;
@@ -492,7 +492,6 @@
           ${num('rapidOthers', 'Rapid Fire: others on a wrong answer', 'Seconds taken off every other team')}
           ${num('rapidAnswer', 'Rapid Fire: time to answer', 'Seconds after buzzing')}
           ${num('melaleOverPar', 'Melale: step over par', 'Per extra step beyond the shortest ladder')}
-          ${num('melaleHint', 'Melale: hint', 'Reveals the next step')}
         </div>
         <div class="panel"><h3>Krillion</h3>
           ${num('krillionPrompt', 'Seconds per prompt', 'Auto-skips when time runs out')}
