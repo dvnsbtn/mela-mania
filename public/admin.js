@@ -24,6 +24,7 @@
     krillion: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 8c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M3 14c2-2 4-2 6 0s4 2 6 0 4-2 6 0" opacity=".6"/><path d="M3 20c2-2 4-2 6 0s4 2 6 0 4-2 6 0" opacity=".3"/></svg>',
     strands: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l5 4-2 6 7 4 4-6"/><circle cx="5" cy="5" r="2" fill="currentColor"/><circle cx="19" cy="13" r="2" fill="currentColor"/></svg>',
     rapid: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/></svg>',
+    melale: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 3v18M17 3v18M7 7h10M7 12h10M7 17h10"/></svg>',
   };
   const NAVICON = {
     join: '<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M20 20h-3"/></svg>',
@@ -355,6 +356,7 @@
     strands: 'Theme, a spangram that stretches across the board, and the theme words. Total letters must be exactly <b>48</b>. The grid is generated for you — press Save again for a fresh layout.',
     krillion: 'Each prompt starts with <b>?</b>. List accepted answers by rarity: <b>surface</b> (common), <b>deep</b> (rare, earns time back), <b>abyss</b> (very rare, earns more). Small typos are forgiven.',
     rapid: 'One question per line, accepted answers after <b>|</b>, separated by <b>/</b>. Small typos are forgiven.',
+    melale: 'A Poople-style word ladder. Set the <b>Target</b>, then one starting word per line (each line is a stage), with an optional label after <b>|</b>. Starting words can be made-up letters, but each move changes one letter and must be a real word. Par (the shortest ladder) is worked out for you; every step over par adds time.',
   };
   async function renderPuzzles(stage) {
     if (mountedView === 'puzzles') return;
@@ -376,6 +378,7 @@
         <div class="pv-grid" style="grid-template-columns:repeat(${c.grid.cols},1fr);max-width:300px">${c.grid.letters.map((L, i) => `<span style="background:${color[i]};color:#111">${L}</span>`).join('')}</div>`;
     }
     if (game === 'krillion') return `<div class="pv-list">${c.prompts.map(p => `<div><b>${esc(p.prompt)}</b><br><small>${p.tiers.surface.length} surface · ${p.tiers.deep.length} deep · ${p.tiers.abyss.length} abyss</small></div>`).join('')}</div>`;
+    if (game === 'melale') return `<div class="pv-list">${c.ladders.map(l => `<div><b>${esc(l.start)}</b> → ${esc(c.target)} · par ${l.par}${l.label ? ` · <small>${esc(l.label)}</small>` : ''}<br><small>e.g. ${esc(l.path.join(' → '))}</small></div>`).join('')}</div>`;
     if (game === 'rapid') return `<div class="pv-list">${c.questions.map((q, i) => `<div><small>${i + 1}.</small> ${esc(q.q)}<br><small>→ ${esc(q.answers.join(' / '))}</small></div>`).join('')}</div>`;
   }
   function drawEditor() {
@@ -414,6 +417,8 @@
           ${num('hangmanMiss', 'Hangman: word lost', 'Ran out of lives on a word')}
           ${num('strandsHint', 'Strands: hint used', 'Per hint')}
           ${num('rapidSkip', 'Rapid Fire: skip', 'Per skipped question')}
+          ${num('melaleOverPar', 'Melale: step over par', 'Per extra step beyond the shortest ladder')}
+          ${num('melaleHint', 'Melale: hint', 'Reveals the next step')}
         </div>
         <div class="panel"><h3>Krillion</h3>
           ${num('krillionPrompt', 'Seconds per prompt', 'Auto-skips when time runs out')}

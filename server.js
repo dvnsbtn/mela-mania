@@ -27,6 +27,8 @@ const DEFAULT_SETTINGS = {
   krillionDeep: 5,     // time credit for a rare answer
   krillionAbyss: 10,   // time credit for a very rare answer
   rapidSkip: 15,
+  melaleOverPar: 5,    // per step beyond the shortest possible ladder
+  melaleHint: 15,
   limits: Object.fromEntries(GAMES.map(g => [g.id, g.defaultLimit])),
 };
 
@@ -54,6 +56,14 @@ let state;
 try {
   state = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   state.settings = { ...DEFAULT_SETTINGS, ...state.settings, limits: { ...DEFAULT_SETTINGS.limits, ...(state.settings || {}).limits } };
+  // make sure every current game exists in an older saved state
+  const fresh = defaultContent();
+  for (const g of GAMES) {
+    if (!state.rounds[g.id]) state.rounds[g.id] = { status: 'idle' };
+    if (!state.progress[g.id]) state.progress[g.id] = {};
+    if (!state.content[g.id]) { state.content[g.id] = fresh.content[g.id]; state.text[g.id] = fresh.text[g.id]; }
+  }
+  if (state.current && !GAMES.some(g => g.id === state.current)) state.current = null;
   console.log('Restored saved game state.');
 } catch { state = freshState(); }
 
@@ -307,7 +317,7 @@ const adminActions = {
     if (typeof settings.eventName === 'string') s.eventName = settings.eventName.slice(0, 60) || s.eventName;
     if (typeof settings.tagline === 'string') s.tagline = settings.tagline.slice(0, 80);
     if (typeof settings.joinUrl === 'string') s.joinUrl = settings.joinUrl.trim().replace(/\/+$/, '').slice(0, 200);
-    for (const k of ['dnfPenalty', 'hangmanMiss', 'strandsHint', 'krillionPrompt', 'krillionSkip', 'krillionDeep', 'krillionAbyss', 'rapidSkip']) {
+    for (const k of ['dnfPenalty', 'hangmanMiss', 'strandsHint', 'krillionPrompt', 'krillionSkip', 'krillionDeep', 'krillionAbyss', 'rapidSkip', 'melaleOverPar', 'melaleHint']) {
       if (settings[k] != null && !isNaN(settings[k])) s[k] = Math.max(0, Math.min(3600, Number(settings[k])));
     }
     s.krillionPrompt = Math.max(5, s.krillionPrompt);

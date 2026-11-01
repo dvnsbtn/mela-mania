@@ -12,7 +12,7 @@
     mounted = m;
   }
 
-  const GAME_COLOR = { hangman: 'var(--hangman)', connections: 'var(--connections)', wordle: 'var(--wordle)', krillion: 'var(--krillion)', strands: 'var(--strands)', rapid: 'var(--rapid)' };
+  const GAME_COLOR = { hangman: 'var(--hangman)', connections: 'var(--connections)', wordle: 'var(--wordle)', melale: 'var(--melale)', krillion: 'var(--krillion)', strands: 'var(--strands)', rapid: 'var(--rapid)' };
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = secs => {
     if (secs == null) return '—';
@@ -143,6 +143,7 @@
     if (r.status === 'playing' || r.status === 'waiting') title = "Time's up";
     let reveal = '';
     if (g && view.round.game === 'wordle' && g.answer) reveal = `<div class="reveal muted">The word was<br><b>${esc(g.answer)}</b></div>`;
+    if (g && view.round.game === 'melale' && g.results) reveal = `<div class="breakdown">${g.results.map(r => `<div><span>${esc(r.chain.join(' → '))}</span><span>${r.steps}/${r.par}</span></div>`).join('')}</div>`;
     if (g && view.round.game === 'connections' && g.solved) reveal = `<div class="cx-grid">${g.solved.map(s => `<div class="cx-group l${s.level} ${s.missed ? 'missed' : ''}"><b>${esc(s.name)}</b><span>${esc(s.words.join(', '))}</span></div>`).join('')}</div>`;
     const rows = [];
     if (r.status === 'done') {
@@ -317,6 +318,66 @@
       const rank = { absent: 1, present: 2, correct: 3 }, best = {};
       v.guesses.forEach(g => g.marks.forEach((m, i) => { const L = g.word[i]; if (!best[L] || rank[m] > rank[best[L]]) best[L] = m; }));
       el.querySelectorAll('#wd-kbd button').forEach(b => { b.className = (b.classList.contains('wide') ? 'wide ' : '') + (best[b.dataset.k] || ''); });
+    },
+  };
+
+  // ---- Melale (word ladder to MELA) ----
+  GAMES.melale = {
+    mount(el, v) {
+      this.el = el; this.typed = ''; this.busy = false; this.v = v;
+      const rows = ['QWERTYUIOP', 'ASDFGHJKL', '+ZXCVBNM-'];
+      el.innerHTML = `
+        <div class="sub"><span id="ml-n"></span><span id="ml-par"></span></div>
+        <div class="ml-board" id="ml-board"></div>
+        <div class="row-btns"><button class="btn ghost small" id="ml-undo">Undo</button><button class="btn ghost small" id="ml-hint">Hint</button></div>
+        <div class="wd-kbd" id="ml-kbd">${rows.map(r => `<div class="r">${r.split('').map(c => c === '+' ? '<button class="wide" data-k="Enter">ENTER</button>' : c === '-' ? '<button class="wide" data-k="Backspace">⌫</button>' : `<button data-k="${c}">${c}</button>`).join('')}</div>`).join('')}</div>`;
+      el.querySelector('#ml-kbd').addEventListener('click', e => { const b = e.target.closest('button'); if (b) this.key(b.dataset.k); });
+      el.querySelector('#ml-undo').onclick = async () => { this.typed = ''; const r = await act({ type: 'undo' }); if (r.msg) toast(r.msg, r.tone); };
+      el.querySelector('#ml-hint').onclick = async () => { this.typed = ''; const r = await act({ type: 'hint' }); if (r.msg) toast(r.msg, r.tone || 'good'); };
+      this.keyHandler = e => { if (e.metaKey || e.ctrlKey || (e.target && e.target.tagName === 'INPUT')) return; if (e.key === 'Enter' || e.key === 'Backspace' || /^[a-z]$/i.test(e.key)) { e.preventDefault(); this.key(e.key.length === 1 ? e.key.toUpperCase() : e.key); } };
+      document.addEventListener('keydown', this.keyHandler);
+    },
+    unmount() { document.removeEventListener('keydown', this.keyHandler); },
+    async key(k) {
+      const v = this.v; if (!v || this.busy || !v.start) return;
+      const n = v.target.length;
+      if (k === 'Backspace') this.typed = this.typed.slice(0, -1);
+      else if (k === 'Enter') {
+        if (this.typed.length !== n) { this.shake(); toast(`Type a ${n}-letter word`); return; }
+        this.busy = true;
+        const r = await act({ type: 'step', word: this.typed });
+        this.busy = false;
+        if (r.ok) this.typed = ''; else this.shake();
+        if (r.msg) toast(r.msg, r.ok ? 'good' : 'bad');
+      } else if (/^[A-Z]$/.test(k) && this.typed.length < n) this.typed += k;
+      this.draw();
+    },
+    shake() { const row = this.el.querySelector('.ml-row.input'); if (row) { row.classList.remove('shake'); void row.offsetWidth; row.classList.add('shake'); } },
+    update(v) {
+      if (this.v && v.index !== this.v.index) this.typed = '';
+      this.v = v; this.draw();
+    },
+    draw() {
+      const v = this.v, el = this.el; if (!v.start) return;
+      const T = v.target, n = T.length;
+      el.querySelector('#ml-n').textContent = `Stage ${v.index + 1} of ${v.total}${v.label ? ' · ' + v.label : ''}`;
+      const steps = v.chain.length - 1;
+      el.querySelector('#ml-par').innerHTML = `Steps <b>${steps}</b> · Par <b>${v.par}</b>`;
+      const cells = (w, prev, cls) => `<div class="ml-row ${cls || ''}">${[...w.padEnd(n)].map((ch, i) => {
+        const c = [];
+        if (prev && ch !== prev[i] && ch !== ' ') c.push('chg');
+        if (ch === T[i] && cls !== 'goal') c.push('hit');
+        return `<div class="ml-cell ${c.join(' ')}">${ch === ' ' ? '' : ch}</div>`;
+      }).join('')}</div>`;
+      const last = v.chain[v.chain.length - 1];
+      let html = v.chain.map((w, i) => cells(w, i ? v.chain[i - 1] : null, i === 0 ? 'start' : '')).join('');
+      html += `<div class="ml-row input">${Array.from({ length: n }, (_, i) => this.typed[i] ? `<div class="ml-cell typed ${this.typed[i] !== last[i] ? 'chg' : ''}">${this.typed[i]}</div>` : `<div class="ml-cell ghost">${last[i]}</div>`).join('')}</div>`;
+      html += `<div class="ml-goal-label">Goal</div>` + cells(T, null, 'goal');
+      const board = el.querySelector('#ml-board');
+      board.innerHTML = html;
+      board.scrollTop = board.scrollHeight;
+      el.querySelector('#ml-undo').disabled = v.chain.length < 2;
+      el.querySelector('#ml-hint').textContent = `Hint +${v.hintPenalty}s`;
     },
   };
 
