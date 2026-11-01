@@ -54,6 +54,7 @@ function freshState() {
     progress: Object.fromEntries(GAMES.map(g => [g.id, {}])),
     current: null,
     adminKeys: [],
+    edited: {},     // games whose puzzle the host changed in the editor
     touched: false, // becomes true once anything real happens (a join, any host action)
   };
 }
@@ -81,6 +82,7 @@ function normalize(state) {
   if (state.current && !isGame(state.current)) state.current = null;
   if (state.rounds.rapid.status === 'live' && !state.buzz) state.buzz = buzzer.fresh();
   if (state.touched == null) state.touched = true;
+  if (!state.edited || typeof state.edited !== 'object') state.edited = {};
   return state;
 }
 
@@ -411,12 +413,17 @@ const adminActions = {
     if (state.current === game) throw new Error('Players are still on this round — send them back to the lobby first.');
     state.content[game] = PARSERS[game](String(text || ''));
     state.text[game] = String(text || '');
+    state.edited[game] = true;
   },
   // put back a backup kept by the host's browser (after Render restarts and wipes the disk)
   restore: ({ backup }) => {
     const s = normalize(JSON.parse(JSON.stringify(backup || null)));
     if (!s.content || !s.teams) throw new Error('That is not a Mela Mania backup.');
     for (const g of GAMES) if (!s.content[g.id]) throw new Error('Backup is missing ' + g.title + '.');
+    // puzzles the host never edited follow the code (so updated puzzles in a new deploy aren't undone),
+    // unless that round has already been played with the old puzzle
+    const fresh = defaultContent();
+    for (const g of GAMES) if (!s.edited[g.id] && s.rounds[g.id].status === 'idle') { s.content[g.id] = fresh.content[g.id]; s.text[g.id] = fresh.text[g.id]; }
     for (const set of teamClients.values()) for (const res of set) res.end(); // they reconnect against the restored teams
     teamClients.clear();
     state = { ...s, adminKeys: state.adminKeys, touched: true };
