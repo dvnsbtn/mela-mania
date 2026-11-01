@@ -8,6 +8,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { GAMES, PARSERS, defaultContent } = require('./lib/content');
 const { ENGINES } = require('./lib/games');
+const buzzer = require('./lib/buzzer');
 
 const PORT = Number(process.env.PORT) || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'host123';
@@ -27,6 +28,10 @@ const DEFAULT_SETTINGS = {
   krillionDeep: 5,     // time credit for a rare answer
   krillionAbyss: 10,   // time credit for a very rare answer
   rapidSkip: 15,
+  rapidCorrect: 60,    // buzzer round: right answer takes this off
+  rapidWrong: 10,      // buzzer round: wrong answer adds this
+  rapidOthers: 10,     // buzzer round: every other team gets this off when someone is wrong
+  rapidAnswer: 15,     // buzzer round: seconds to answer after buzzing
   melaleOverPar: 5,    // per step beyond the shortest possible ladder
   melaleHint: 15,
   limits: Object.fromEntries(GAMES.map(g => [g.id, g.defaultLimit])),
@@ -82,6 +87,10 @@ const round1 = x => Math.round(x * 10) / 10;
 function teamRoundResult(game, teamId) {
   const r = state.rounds[game];
   if (r.status === 'idle') return null;
+  if (game === 'rapid') {
+    const n = state.buzz ? buzzer.net(state.buzz, teamId) : 0;
+    return { status: r.status === 'ended' ? 'done' : 'playing', time: n, buzzer: true };
+  }
   const p = state.progress[game][teamId];
   const dnf = r.limit + state.settings.dnfPenalty;
   if (p && p.status === 'done') {
@@ -154,6 +163,7 @@ function adminView() {
     rounds: state.rounds,
     current: cur,
     live,
+    buzz: cur === 'rapid' && state.buzz ? buzzer.publicView(state, state.content.rapid, null) : null,
     leaderboard: leaderboard(),
   };
 }
@@ -174,6 +184,10 @@ function teamView(t) {
   const p = state.progress[cur][t.id];
   const round = { game: cur, title: meta.title, blurb: meta.blurb, startedAt: r.startedAt, endsAt: r.endsAt, limit: r.limit, status: r.status };
   const result = teamRoundResult(cur, t.id);
+  if (cur === 'rapid') {
+    const game = state.buzz ? buzzer.publicView(state, state.content.rapid, t.id) : null;
+    return { ...base, screen: r.status === 'ended' ? 'finished' : 'round', round, result, game };
+  }
   if (r.status === 'ended' || (p && p.status)) {
     return {
       ...base, screen: 'finished', round, result,
@@ -225,6 +239,7 @@ setInterval(() => {
   if (r.status !== 'live') return;
   const now = Date.now();
   let dirty = false;
+  if (g === 'rapid') { if (buzzer.tick(state, now)) changed(); return; } // host-paced: no clock, no auto-end
   if (ENGINES[g].tick) {
     for (const p of Object.values(state.progress[g])) {
       if (ENGINES[g].tick(state.content[g], p, state.settings, now)) {
@@ -283,6 +298,7 @@ const adminActions = {
     if (!t) return;
     delete state.teams[teamId];
     for (const g of GAMES) delete state.progress[g.id][teamId];
+    if (state.buzz && state.buzz.team === teamId) { state.buzz.team = null; state.buzz.phase = 'open'; }
     for (const res of teamClients.get(teamId) || []) { send(res, 'kicked', {}); res.end(); }
     teamClients.delete(teamId);
   },
@@ -294,16 +310,23 @@ const adminActions = {
     state.settings.limits[game] = secs;
     state.rounds[game] = { status: 'live', startedAt: now, endsAt: now + secs * 1000, limit: secs };
     state.progress[game] = {};
+    if (game === 'rapid') { state.buzz = buzzer.fresh(); state.rounds[game].endsAt = now + 24 * 3600e3; state.rounds[game].limit = 0; }
     state.current = game;
+  },
+  buzzer: ({ action }) => {
+    if (state.current !== 'rapid' || state.rounds.rapid.status !== 'live') throw new Error('Rapid Fire is not live.');
+    buzzer.hostAction(state, state.content.rapid, action);
   },
   'end-round': ({ game }) => endRound(game || state.current),
   'add-time': ({ seconds }) => {
+    if (state.current === 'rapid') throw new Error('Rapid Fire has no clock.');
     const r = state.current && state.rounds[state.current];
     if (!r || r.status !== 'live') throw new Error('No live round');
     r.endsAt += (Number(seconds) || 60) * 1000;
     r.limit += Number(seconds) || 60;
   },
   'reset-round': ({ game }) => {
+    if (game === 'rapid') state.buzz = null;
     state.rounds[game] = { status: 'idle' };
     state.progress[game] = {};
     if (state.current === game) state.current = null;
@@ -317,10 +340,11 @@ const adminActions = {
     if (typeof settings.eventName === 'string') s.eventName = settings.eventName.slice(0, 60) || s.eventName;
     if (typeof settings.tagline === 'string') s.tagline = settings.tagline.slice(0, 80);
     if (typeof settings.joinUrl === 'string') s.joinUrl = settings.joinUrl.trim().replace(/\/+$/, '').slice(0, 200);
-    for (const k of ['dnfPenalty', 'hangmanMiss', 'strandsHint', 'krillionPrompt', 'krillionSkip', 'krillionDeep', 'krillionAbyss', 'rapidSkip', 'melaleOverPar', 'melaleHint']) {
+    for (const k of ['dnfPenalty', 'hangmanMiss', 'strandsHint', 'krillionPrompt', 'krillionSkip', 'krillionDeep', 'krillionAbyss', 'rapidSkip', 'melaleOverPar', 'melaleHint', 'rapidCorrect', 'rapidWrong', 'rapidOthers', 'rapidAnswer']) {
       if (settings[k] != null && !isNaN(settings[k])) s[k] = Math.max(0, Math.min(3600, Number(settings[k])));
     }
     s.krillionPrompt = Math.max(5, s.krillionPrompt);
+    s.rapidAnswer = Math.max(5, s.rapidAnswer);
     if (settings.limits) for (const g of GAMES) if (settings.limits[g.id]) s.limits[g.id] = Math.max(30, Math.min(3600, Number(settings.limits[g.id])));
   },
   content: ({ game, text }) => {
@@ -382,6 +406,14 @@ const server = http.createServer(async (req, res) => {
       const g = state.current;
       if (!g || g !== b.game || state.rounds[g].status !== 'live') return json(res, 200, { ok: false, msg: 'This round is closed' });
       const now = Date.now();
+      if (g === 'rapid') {
+        if (!state.buzz) state.buzz = buzzer.fresh();
+        if (b.action && b.action.type === 'start') return json(res, 200, { ok: true });
+        buzzer.tick(state, now);
+        const out = buzzer.teamAction(state, state.content.rapid, t.id, b.action || {}, now);
+        changed();
+        return json(res, 200, out);
+      }
       const prog = ensureProgress(g, t.id, now);
       if (b.action && b.action.type === 'start') { changed(); return json(res, 200, { ok: true }); }
       if (prog.status) return json(res, 200, { ok: false, msg: 'Already finished' });

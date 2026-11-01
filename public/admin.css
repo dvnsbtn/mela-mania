@@ -154,6 +154,22 @@ body.present .team .x { display: none; }
 .lrow.flash { animation: flash 1.2s; }
 @keyframes flash { 0% { background: color-mix(in srgb, var(--good) 40%, var(--panel)); transform: scale(1.015); } }
 
+/* ---------- buzzer ---------- */
+.bz-q { font-family: var(--display); font-weight: 800; font-size: clamp(30px, 3.6vw, 56px); letter-spacing: -0.03em; line-height: 1.08; background: var(--panel); border: 1px solid var(--line); border-radius: 24px; padding: 34px 36px; min-height: 160px; display: flex; align-items: center; }
+.bz-q .dim { color: var(--ink-3); }
+.bz-status { display: grid; gap: 10px; }
+.bz-status > div { border-radius: 18px; padding: 18px 22px; font-size: 22px; font-weight: 600; }
+.bz-open { background: rgba(240,112,90,.14); color: var(--bad); font-family: var(--display); font-weight: 800 !important; font-size: 34px !important; text-align: center; animation: blink 1.2s infinite; }
+.bz-ans { background: color-mix(in srgb, var(--rapid) 18%, var(--panel)); display: grid; grid-template-columns: 1fr 1fr auto; gap: 18px; align-items: center; }
+.bz-ans b { font-size: 30px; }
+.bz-tbar { height: 10px; border-radius: 10px; background: var(--panel-2); overflow: hidden; }
+.bz-tbar i { display: block; height: 100%; background: var(--rapid); transform-origin: left; }
+.bz-right { background: color-mix(in srgb, var(--good) 16%, var(--panel)); }
+.bz-wrong { background: color-mix(in srgb, var(--bad) 12%, var(--panel)); font-size: 18px !important; }
+.bz-none { background: var(--panel-2); }
+.bz-a { margin-top: 6px; font-family: var(--display); font-size: 28px; font-weight: 800; color: var(--ink); }
+.bz-scores { display: grid; gap: 8px; }
+
 /* ---------- leaderboard ---------- */
 .podium { display: grid; grid-template-columns: 1fr 1.15fr 1fr; gap: 16px; align-items: end; }
 .pod { border-radius: 22px; padding: 22px; display: flex; flex-direction: column; gap: 10px; position: relative; overflow: hidden; background: var(--panel); border: 1px solid var(--line); }

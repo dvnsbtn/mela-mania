@@ -146,7 +146,8 @@
     if (g && view.round.game === 'melale' && g.results) reveal = `<div class="breakdown">${g.results.map(r => `<div><span>${esc(r.chain.join(' → '))}</span><span>${r.steps}/${r.par}</span></div>`).join('')}</div>`;
     if (g && view.round.game === 'connections' && g.solved) reveal = `<div class="cx-grid">${g.solved.map(s => `<div class="cx-group l${s.level} ${s.missed ? 'missed' : ''}"><b>${esc(s.name)}</b><span>${esc(s.words.join(', '))}</span></div>`).join('')}</div>`;
     const rows = [];
-    if (r.status === 'done') {
+    if (r.buzzer) { title = 'Round over'; }
+    else if (r.status === 'done') {
       rows.push(['Solve time', fmt(r.raw)]);
       if (r.penalty) rows.push(['Penalties', '+' + r.penalty + 's']);
       if (r.bonus) rows.push(['Bonus', '−' + r.bonus + 's']);
@@ -157,7 +158,8 @@
       <div class="done">
         <div class="kicker">${esc(view.round.title)}</div>
         <h2>${title}</h2>
-        <div class="big">${r.time != null ? fmt(r.time) : '…'}</div>
+        <div class="big">${r.buzzer ? ((r.time > 0 ? '+' : r.time < 0 ? '−' : '') + Math.abs(r.time) + 's') : r.time != null ? fmt(r.time) : '…'}</div>
+        ${r.buzzer ? `<p class="muted">${r.time < 0 ? 'taken off' : r.time > 0 ? 'added to' : 'no change to'} your total time</p>` : ''}
         ${rows.length ? `<div class="breakdown">${rows.map(([a, b]) => `<div><span>${a}</span><span>${b}</span></div>`).join('')}</div>` : ''}
         ${reveal}
         <p class="muted">${view.round.status === 'live' ? 'Nice. Hang tight while the other teams finish.' : 'Round over — watch the big screen for the leaderboard.'}</p>
@@ -178,8 +180,8 @@
       $app.innerHTML = `
         <div class="round-head">
           <div class="round-title"><h2><span class="dot"></span>${esc(view.round.title)}</h2>
-            <div class="clock" id="clock">0:00<small>your time</small></div></div>
-          <div class="limitbar" id="lb"><i></i></div>
+            <div class="clock" id="clock">0:00<small>${g === 'rapid' ? 'your score' : 'your time'}</small></div></div>
+          <div class="limitbar" id="lb" ${g === 'rapid' ? 'style="visibility:hidden"' : ''}><i></i></div>
         </div>
         <div class="game" id="game"></div>`;
       const el = document.getElementById('game');
@@ -196,6 +198,7 @@
     const tick = () => {
       if (!view || view.screen !== 'round' || !document.getElementById('clock')) return;
       const r = view.round;
+      if (r.game === 'rapid') { if (mounted.game && mounted.game.tick) mounted.game.tick(); clockRaf = requestAnimationFrame(tick); return; }
       const el = document.getElementById('clock');
       const elapsed = (now() - r.startedAt) / 1000;
       el.firstChild.nodeValue = fmtClock(elapsed);
@@ -566,32 +569,62 @@
     },
   };
 
-  // ---- Rapid fire ----
+  // ---- Rapid fire (live buzzer) ----
+  const secs = n => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n) + 's';
   GAMES.rapid = {
-    mount(el) {
-      this.el = el;
-      el.innerHTML = `
-        <div class="rf-dots" id="rf-dots"></div>
-        <div class="rf-card" id="rf-card"><small id="rf-n"></small><p id="rf-q"></p></div>
-        <form id="rf-f" style="display:grid;gap:10px"><input class="field" id="rf-in" placeholder="Type your answer" autocomplete="off" spellcheck="false">
-          <div style="display:flex;gap:8px"><button class="btn" style="flex:1">Answer</button><button type="button" class="btn ghost" id="rf-skip">Skip</button></div></form>`;
-      const inp = el.querySelector('#rf-in'), card = el.querySelector('#rf-card');
-      const flash = c => { card.classList.remove('flash-good', 'flash-bad'); void card.offsetWidth; card.classList.add(c); };
-      el.querySelector('#rf-f').addEventListener('submit', async e => {
-        e.preventDefault(); if (!inp.value.trim()) return;
-        const r = await act({ type: 'answer', text: inp.value });
-        if (r.ok) { inp.value = ''; flash('flash-good'); } else { flash('flash-bad'); if (r.msg) toast(r.msg, 'bad'); inp.select(); }
-        inp.focus();
-      });
-      el.querySelector('#rf-skip').onclick = async () => { const r = await act({ type: 'skip' }); if (r.msg) toast(r.msg, 'bad'); inp.value = ''; inp.focus(); };
-      setTimeout(() => inp.focus(), 50);
-    },
+    mount(el) { this.el = el; this.key = null; },
     update(v) {
-      const el = this.el;
-      el.querySelector('#rf-dots').innerHTML = Array.from({ length: v.total }, (_, i) => { const r = v.results[i]; return `<i class="${r ? (r.correct ? 'ok' : 'skip') : i === v.index ? 'now' : ''}"></i>`; }).join('');
-      el.querySelector('#rf-n').textContent = `Question ${Math.min(v.index + 1, v.total)} of ${v.total}`;
-      el.querySelector('#rf-q').textContent = v.q || '';
-      el.querySelector('#rf-skip').textContent = `Skip +${v.skipPenalty}s`;
+      const el = this.el; this.v = v;
+      if (!v) { el.innerHTML = '<div class="intro"><p class="muted">Get ready…</p></div>'; return; }
+      const mine = v.team === v.me, out = v.locked.includes(v.me);
+      const key = [v.q, v.phase, v.team, out, v.result && v.result.type].join('|');
+      if (key !== this.key) {
+        this.key = key;
+        let body = '';
+        if (v.phase === 'idle') body = `<div class="bz-wait"><div class="waiting"><i></i><i></i><i></i><i></i></div><p>Watch the big screen — the host will reveal the first question.</p></div>`;
+        else if (v.phase === 'over') body = `<div class="bz-wait"><p>That's all the questions! Waiting for the host to close the round.</p></div>`;
+        else {
+          let action = '';
+          if (v.phase === 'open') action = out
+            ? `<div class="bz-note bad">You answered wrong — you're out for this one.</div>`
+            : `<button class="bz-btn" id="bz">BUZZ</button>`;
+          else if (v.phase === 'answering' && mine) action = `
+            <form id="bz-f" class="bz-answer"><div class="bz-timer"><i id="bz-bar"></i></div>
+              <input class="field" id="bz-in" placeholder="Your answer" autocomplete="off" spellcheck="false">
+              <button class="btn block">Submit answer</button></form>`;
+          else if (v.phase === 'answering') action = `<div class="bz-note"><b>${esc(v.teamName)}</b> buzzed first and is answering…</div>`;
+          else if (v.phase === 'closed') {
+            const r = v.result || {};
+            action = r.type === 'correct'
+              ? `<div class="bz-note ${r.team === v.me ? 'good' : ''}"><b>${esc(r.teamName)}</b> got it! <span class="muted">(${secs(-v.rules.correct)})</span><br>Answer: <b>${esc(v.answer)}</b></div>`
+              : `<div class="bz-note">Nobody got it. Answer: <b>${esc(v.answer)}</b></div>`;
+          }
+          const lastWrong = v.last && v.last.type === 'wrong' && v.phase !== 'closed' && !v.last.overruled
+            ? `<div class="bz-last">✗ ${esc(v.last.teamName)} said “${esc(v.last.text)}” — ${v.last.team === v.me ? secs(v.rules.wrong) + ' for you' : secs(-v.rules.others) + ' for you!'}</div>` : '';
+          body = `<div class="rf-card"><small>Question ${v.q + 1} of ${v.total}</small><p>${esc(v.question)}</p></div>${lastWrong}${action}`;
+        }
+        el.innerHTML = `<div class="sub"><span>Right ${secs(-v.rules.correct)} · Wrong ${secs(v.rules.wrong)}</span></div>${body}`;
+        const bz = el.querySelector('#bz');
+        if (bz) bz.onclick = async () => {
+          bz.disabled = true; bz.textContent = '…';
+          const r = await act({ type: 'buzz' });
+          if (r.ok && navigator.vibrate) navigator.vibrate(120);
+          if (r.msg) toast(r.msg, r.ok ? 'good' : 'bad');
+          if (!r.ok) { bz.disabled = false; bz.textContent = 'BUZZ'; }
+        };
+        const f = el.querySelector('#bz-f');
+        if (f) {
+          const inp = f.querySelector('input'); setTimeout(() => inp.focus(), 30);
+          f.onsubmit = async e => { e.preventDefault(); if (!inp.value.trim()) return; f.querySelector('button').disabled = true; const r = await act({ type: 'answer', text: inp.value }); if (r.msg) toast(r.msg, r.tone); };
+        }
+      }
+    },
+    tick() {
+      const v = this.v; if (!v) return;
+      const c = document.getElementById('clock');
+      if (c) c.firstChild.nodeValue = secs(v.myNet || 0);
+      const bar = document.getElementById('bz-bar');
+      if (bar && v.phase === 'answering') bar.style.transform = `scaleX(${Math.max(0, (v.deadline - now()) / 1000 / v.answerSecs)})`;
     },
   };
 

@@ -12,9 +12,11 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = secs => {
     if (secs == null) return '—';
+    const neg = secs < 0; secs = Math.abs(secs);
     const m = Math.floor(secs / 60), s = secs - m * 60;
-    return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1);
+    return (neg ? '−' : '') + m + ':' + (s < 10 ? '0' : '') + s.toFixed(1);
   };
+  const signed = n => (n > 0 ? '+' : n < 0 ? '−' : '±') + Math.abs(n) + 's';
   const clock = secs => { secs = Math.max(0, Math.ceil(secs)); return Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0'); };
 
   const ICON = {
@@ -200,6 +202,7 @@
   function roundStats(id) {
     const r = S.rounds[id];
     if (r.status === 'idle') return 'Not played yet';
+    if (id === 'rapid') { const best = S.leaderboard.slice().sort((a, b) => (a.per.rapid?.time ?? 0) - (b.per.rapid?.time ?? 0))[0]; return best ? `Best: ${esc(best.name)} ${signed(best.per.rapid.time)}` : 'Played'; }
     const fin = S.leaderboard.filter(t => t.per[id] && t.per[id].status === 'done');
     const best = fin.reduce((m, t) => Math.min(m, t.per[id].time), Infinity);
     return `${fin.length}/${S.teams.length} finished${fin.length ? ` · best ${fmt(best)}` : ''}`;
@@ -221,8 +224,8 @@
         return `<div class="gcard ${r.status === 'live' ? 'is-live' : ''}" style="--g:${gcolor(g.id)}" data-g="${g.id}">
           <div class="t"><h3><span class="gicon">${ICON[g.id]}</span>${esc(g.title)}</h3>${chip}</div>
           <p>${esc(g.blurb)}</p>
-          ${r.status === 'idle' ? `<label class="limit ctl">Time limit <input type="number" min="0.5" max="60" step="0.5" value="${lim}" data-limit="${g.id}"> min</label>` : `<div class="stat">${roundStats(g.id)}</div>`}
-          <div class="foot"><span class="stat">${r.status === 'idle' ? '' : 'Limit ' + clock(r.limit)}</span><div class="btns">${btns}</div></div>
+          ${r.status === 'idle' && g.id === 'rapid' ? `<div class="stat">Host-paced · ${S.settings.rapidAnswer}s to answer after buzzing</div>` : r.status === 'idle' ? `<label class="limit ctl">Time limit <input type="number" min="0.5" max="60" step="0.5" value="${lim}" data-limit="${g.id}"> min</label>` : `<div class="stat">${roundStats(g.id)}</div>`}
+          <div class="foot"><span class="stat">${r.status === 'idle' || g.id === 'rapid' ? '' : 'Limit ' + clock(r.limit)}</span><div class="btns">${btns}</div></div>
         </div>`;
       }).join('')}</div>`;
     stage.querySelectorAll('[data-limit]').forEach(i => i.oninput = () => { limitDraft[i.dataset.limit] = i.value; });
@@ -252,6 +255,7 @@
       stage.querySelector('#tor').onclick = () => go('rounds');
       return;
     }
+    if (id === 'rapid') return renderBuzz(stage);
     const g = S.games.find(x => x.id === id), r = S.rounds[id];
     const live = r.status === 'live';
     const key = id + ':' + r.startedAt + ':' + r.status;
@@ -317,6 +321,72 @@
     prevLive = Object.fromEntries(rows.map(t => [t.id, t.status]));
   }
 
+  // ---------------- buzzer round (live) ----------------
+  let buzzRaf = null;
+  function renderBuzz(stage) {
+    const r = S.rounds.rapid, b = S.buzz, live = r.status === 'live';
+    stage.style.setProperty('--g', gcolor('rapid'));
+    if (mountedView !== 'live' || stage.dataset.key !== 'rapid:' + r.startedAt) {
+      stage.dataset.key = 'rapid:' + r.startedAt;
+      stage.innerHTML = `
+        <div class="live-top">
+          <div><div class="eyebrow" style="display:flex;gap:10px;align-items:center"><span id="bz-chip"></span><span id="bz-qn"></span></div>
+            <div class="live-title" style="margin-top:12px"><span class="gicon" style="--g:var(--rapid)">${ICON.rapid}</span><h1 class="h1" style="margin:0">Rapid Fire</h1></div></div>
+          <div class="timer"><div class="eyebrow">Right · Wrong · Others</div><div class="mono" style="font-size:28px;font-weight:800;margin-top:6px">−${S.settings.rapidCorrect}s · +${S.settings.rapidWrong}s · −${S.settings.rapidOthers}s</div></div>
+        </div>
+        <div class="bz-q" id="bz-q"></div>
+        <div class="bz-status" id="bz-st"></div>
+        <div class="btns ctl" id="bz-ctl"></div>
+        <div class="bz-scores" id="bz-sc"></div>`;
+      stage.querySelector('#bz-ctl').onclick = async e => {
+        const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
+        if (a === 'end') { if (confirm('End the buzzer round?')) api('end-round', { game: 'rapid' }); }
+        else if (a === 'board') go('board');
+        else if (a === 'lobby') api('close-round');
+        else if (a === 'rounds') { await api('close-round'); go('rounds'); }
+        else api('buzzer', { action: a });
+      };
+      cancelAnimationFrame(buzzRaf);
+      const tick = () => {
+        const bar = document.getElementById('bz-tbar'); if (!document.getElementById('bz-st') || view !== 'live') return;
+        if (bar && S.buzz && S.buzz.phase === 'answering') {
+          const left = Math.max(0, (S.buzz.deadline - now()) / 1000);
+          bar.style.transform = `scaleX(${left / S.buzz.answerSecs})`;
+          const t = document.getElementById('bz-left'); if (t) t.textContent = Math.ceil(left) + 's';
+        }
+        buzzRaf = requestAnimationFrame(tick);
+      };
+      tick();
+    }
+    const phase = b ? b.phase : 'idle';
+    document.getElementById('bz-chip').innerHTML = live ? '<span class="chip live">Live</span>' : '<span class="chip done">Round over</span>';
+    document.getElementById('bz-qn').textContent = b && b.q >= 0 && phase !== 'over' ? `Question ${b.q + 1} of ${b.total}` : `${b ? b.total : 0} questions`;
+    document.getElementById('bz-q').innerHTML = phase === 'idle' ? '<span class="dim">Teams: get your buzzer finger ready.</span>'
+      : phase === 'over' ? '<span class="dim">That was the last question!</span>' : esc(b.question);
+    let st = '';
+    const last = b && b.last && b.last.type === 'wrong' && !b.last.overruled ? `<div class="bz-wrong">✗ <b>${esc(b.last.teamName)}</b> said “${esc(b.last.text)}” — ${signed(S.settings.rapidWrong)} for them, ${signed(-S.settings.rapidOthers)} for everyone else</div>` : '';
+    if (!live) st = '';
+    else if (phase === 'open') st = `${last}<div class="bz-open">Buzzers open!</div>`;
+    else if (phase === 'answering') st = `${last}<div class="bz-ans"><div><b>${esc(b.teamName)}</b> buzzed first!</div><div class="bz-tbar"><i id="bz-tbar"></i></div><span id="bz-left" class="mono"></span></div>`;
+    else if (phase === 'closed') st = b.result.type === 'correct'
+      ? `<div class="bz-right">✓ <b>${esc(b.result.teamName)}</b>: “${esc(b.result.text)}” — correct! ${signed(-S.settings.rapidCorrect)}${b.result.overruled ? ' <small>(host accepted)</small>' : ''}<div class="bz-a">Answer: ${esc(b.answer)}</div></div>`
+      : `${last}<div class="bz-none">${b.result.type === 'nobody' ? 'Nobody got it.' : 'Skipped.'}<div class="bz-a">Answer: ${esc(b.answer)}</div></div>`;
+    document.getElementById('bz-st').innerHTML = st;
+    const canAccept = b && b.last && b.last.type === 'wrong' && !b.last.overruled && b.last && phase !== 'answering' && (phase === 'open' || (phase === 'closed' && b.result.type === 'nobody'));
+    document.getElementById('bz-ctl').innerHTML = live ? `
+      <button class="btn go" data-a="next" ${phase === 'answering' || phase === 'over' ? 'disabled' : ''}>${phase === 'idle' ? 'Show first question' : 'Next question →'}</button>
+      ${phase === 'open' ? '<button class="btn ghost" data-a="reveal">Reveal answer & skip</button>' : ''}
+      ${canAccept ? '<button class="btn ghost" data-a="accept">Accept last answer as correct</button>' : ''}
+      <button class="btn danger" data-a="end">End round</button>`
+      : `<button class="btn" data-a="board">Show leaderboard →</button><button class="btn ghost" data-a="lobby">Send players to lobby</button><button class="btn ghost" data-a="rounds">Next round</button>`;
+    const scores = b ? b.scores : [];
+    document.getElementById('bz-sc').innerHTML = scores.length ? scores.map((t, i) => `
+      <div class="lrow ${b.team === t.id ? 'done flash' : ''} ${b.locked.includes(t.id) && phase !== 'closed' ? 'failed' : ''}">
+        <div class="pos">${i + 1}</div><div class="name">${esc(t.name)}</div>
+        <div class="detail">${b.team === t.id ? 'answering…' : b.locked.includes(t.id) && phase !== 'closed' ? 'out this question' : ''}</div>
+        <div class="tm">${signed(t.net)}</div></div>`).join('') : '<div class="empty">No teams yet.</div>';
+  }
+
   // ---------------- leaderboard ----------------
   function renderBoard(stage) {
     const played = S.games.filter(g => S.rounds[g.id].status !== 'idle');
@@ -334,6 +404,7 @@
         <tbody>${lb.map(t => `<tr data-id="${t.id}" class="r${t.rank}"><td>${t.played ? t.rank : '–'}</td><td class="nm">${esc(t.name)}</td>${played.map(g => {
           const p = t.per[g.id];
           if (!p || p.time == null) return `<td class="c na">${p && p.status === 'playing' ? 'playing…' : '—'}</td>`;
+          if (p.buzzer) return `<td class="c ${p.time > 0 ? 'pen' : ''}">${signed(p.time)}</td>`;
           const pen = p.status === 'dnf' || p.status === 'failed' || p.status === 'absent';
           return `<td class="c ${pen ? 'pen' : ''}" title="${pen ? 'Did not finish: limit + penalty' : ''}">${fmt(p.time)}</td>`;
         }).join('')}<td class="total">${t.played ? fmt(t.total) : '—'}</td></tr>`).join('')}</tbody></table>`
@@ -355,7 +426,7 @@
     connections: 'Exactly four groups of four, easiest first (yellow, green, blue, purple). Teams get 4 mistakes.',
     strands: 'Theme, a spangram that stretches across the board, and the theme words. Total letters must be exactly <b>48</b>. The grid is generated for you — press Save again for a fresh layout.',
     krillion: 'Each prompt starts with <b>?</b>. List accepted answers by rarity: <b>surface</b> (common), <b>deep</b> (rare, earns time back), <b>abyss</b> (very rare, earns more). Small typos are forgiven.',
-    rapid: 'One question per line, accepted answers after <b>|</b>, separated by <b>/</b>. Small typos are forgiven.',
+    rapid: 'Buzzer round. One question per line, accepted answers after <b>|</b>, separated by <b>/</b>. Small typos are forgiven, and you can overrule a wrong call live. The first answer listed is the one shown when a question closes.',
     melale: 'A Poople-style word ladder. Set the <b>Target</b>, then one starting word per line (each line is a stage), with an optional label after <b>|</b>. Use <b>&gt;</b> to show fixed opening rows (e.g. <b>FMAC &gt; FACE</b>) — players start from the last one. Starting words can be made-up letters, but each move changes one letter and must be a real word. Par (the shortest ladder) is worked out for you; every step over par adds time.',
   };
   async function renderPuzzles(stage) {
@@ -416,7 +487,10 @@
           ${num('dnfPenalty', 'Did not finish', 'Added on top of the time limit')}
           ${num('hangmanMiss', 'Hangman: word lost', 'Ran out of lives on a word')}
           ${num('strandsHint', 'Strands: hint used', 'Per hint')}
-          ${num('rapidSkip', 'Rapid Fire: skip', 'Per skipped question')}
+          ${num('rapidCorrect', 'Rapid Fire: right answer', 'Seconds taken off')}
+          ${num('rapidWrong', 'Rapid Fire: wrong answer', 'Seconds added to that team')}
+          ${num('rapidOthers', 'Rapid Fire: others on a wrong answer', 'Seconds taken off every other team')}
+          ${num('rapidAnswer', 'Rapid Fire: time to answer', 'Seconds after buzzing')}
           ${num('melaleOverPar', 'Melale: step over par', 'Per extra step beyond the shortest ladder')}
           ${num('melaleHint', 'Melale: hint', 'Reveals the next step')}
         </div>

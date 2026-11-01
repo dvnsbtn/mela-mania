@@ -217,6 +217,19 @@ button { cursor: pointer; border: 0; background: none; }
 .rf-card.flash-good { animation: fg .5s; } .rf-card.flash-bad { animation: shake .4s; }
 @keyframes fg { 0% { background: var(--good); } 100% { background: var(--ink); } }
 
+/* ---------- buzzer ---------- */
+.bz-btn { width: min(68vw, 260px); aspect-ratio: 1; border-radius: 50%; margin: 18px auto 0; display: grid; place-items: center; background: radial-gradient(circle at 35% 30%, #FF7A66, #D9342A 60%, #A3201A); color: #fff; font-family: var(--display); font-weight: 800; font-size: 44px; letter-spacing: .04em; box-shadow: 0 10px 0 #7E1712, 0 18px 30px rgba(160,30,20,.35); transition: transform .06s, box-shadow .06s; user-select: none; }
+.bz-btn:active { transform: translateY(8px); box-shadow: 0 2px 0 #7E1712, 0 6px 14px rgba(160,30,20,.3); }
+.bz-btn:disabled { filter: grayscale(.6); opacity: .7; }
+.bz-note { text-align: center; padding: 18px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); font-size: 17px; line-height: 1.5; }
+.bz-note.good { background: color-mix(in srgb, var(--good) 14%, var(--surface)); border-color: var(--good); }
+.bz-note.bad { color: var(--bad); font-weight: 600; }
+.bz-last { text-align: center; font-weight: 600; color: var(--ink-2); font-size: 14px; }
+.bz-wait { flex: 1; display: grid; place-items: center; text-align: center; color: var(--ink-2); padding: 40px 10px; }
+.bz-answer { display: grid; gap: 10px; }
+.bz-timer { height: 6px; border-radius: 6px; background: var(--line); overflow: hidden; }
+.bz-timer i { display: block; height: 100%; background: var(--bad); transform-origin: left; }
+
 /* ---------- finished ---------- */
 .done { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 18px; text-align: center; }
 .done .kicker { font-weight: 800; letter-spacing: .1em; text-transform: uppercase; font-size: 12px; color: var(--game); }
