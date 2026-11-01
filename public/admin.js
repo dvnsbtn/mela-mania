@@ -42,9 +42,12 @@
   const toast = (m, bad) => { const t = document.getElementById('toast'); t.textContent = m; t.className = 'show' + (bad ? ' bad' : ''); clearTimeout(toastT); toastT = setTimeout(() => t.className = '', 2200); };
 
   async function api(action, payload = {}) {
-    const r = await fetch('/api/admin/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, ...payload }) });
-    if (r.status === 401) { logout(); return {}; }
-    const j = await r.json();
+    let r, j;
+    try {
+      r = await fetch('/api/admin/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, ...payload }) });
+      if (r.status === 401) { logout(); return {}; }
+      j = await r.json();
+    } catch { toast('Connection problem — that didn\'t go through. Try again.', true); return {}; }
     if (j.ok === false && j.error) toast(j.error, true);
     return j;
   }
@@ -66,11 +69,13 @@
       connect();
     };
   }
-  function logout() { if (es) es.close(); key = null; try { localStorage.removeItem(KEY); } catch {} renderLogin(); }
+  // S/mountedView reset so logging back in rebuilds the shell instead of rendering into a missing one
+  function logout() { if (es) es.close(); key = null; S = null; mountedView = null; try { localStorage.removeItem(KEY); } catch {} renderLogin(); }
 
   function connect() {
     if (es) es.close();
-    es = new EventSource('/events/admin?key=' + encodeURIComponent(key));
+    const mine = es = new EventSource('/events/admin?key=' + encodeURIComponent(key));
+    const retry = () => setTimeout(() => { if (es === mine && key) connect(); }, 2000);
     let got = false;
     es.addEventListener('state', e => {
       got = true;
@@ -80,7 +85,16 @@
       if (prev && S.current && S.rounds[S.current].status === 'live' && (!prev.current || prev.rounds[S.current].status !== 'live')) view = 'live';
       render();
     });
-    es.onerror = () => { if (!got) { es.close(); fetch('/events/admin?key=' + encodeURIComponent(key)).then(r => { if (r.status === 401) logout(); }); } };
+    // EventSource stops for good after an HTTP error (e.g. 502 while the host wakes/restarts): check auth, else keep retrying
+    es.onerror = () => {
+      if (!got) {
+        mine.close();
+        fetch('/events/admin?key=' + encodeURIComponent(key)).then(r => {
+          if (r.body) r.body.cancel().catch(() => {});
+          if (r.status === 401) logout(); else retry();
+        }).catch(retry);
+      } else if (mine.readyState === EventSource.CLOSED) retry();
+    };
   }
 
   // ---------------- shell ----------------
@@ -427,7 +441,7 @@
     strands: 'Theme, a spangram that stretches across the board, and the theme words. Total letters must be exactly <b>48</b>. The grid is generated for you — press Save again for a fresh layout.',
     krillion: 'Each prompt starts with <b>?</b>. List accepted answers by rarity: <b>surface</b> (common), <b>deep</b> (rare, earns time back), <b>abyss</b> (very rare, earns more). Small typos are forgiven.',
     rapid: 'Buzzer round. One question per line, accepted answers after <b>|</b>, separated by <b>/</b>. Small typos are forgiven, and you can overrule a wrong call live. The first answer listed is the one shown when a question closes.',
-    melale: 'A Poople-style word ladder. Set the <b>Target</b>, then one starting word per line (each line is a stage), with an optional label after <b>|</b>. Use <b>&gt;</b> to show fixed opening rows (e.g. <b>FMAC &gt; FACE</b>) — players start from the last one. Starting words can be made-up letters, but each move changes one letter and must be a real word. Par (the shortest ladder) is worked out for you; every step over par adds time. There are no hints.',
+    melale: 'A Poople-style word ladder. Set the <b>Target</b>, then one starting word per line (each line is a stage), with an optional label after <b>|</b>. Use <b>&gt;</b> to show fixed opening rows (e.g. <b>FMAC &gt; FACE</b>) — players start from the last one. Starting words can be made-up letters, but each move changes one letter and must be a real word. Par (the shortest ladder) is worked out for you; every step over par adds time. Teams get 3 hints per round; each plays the next word for them and adds the hint penalty (Settings).',
   };
   async function renderPuzzles(stage) {
     if (mountedView === 'puzzles') return;
@@ -492,6 +506,7 @@
           ${num('rapidOthers', 'Rapid Fire: others on a wrong answer', 'Seconds taken off every other team')}
           ${num('rapidAnswer', 'Rapid Fire: time to answer', 'Seconds after buzzing')}
           ${num('melaleOverPar', 'Melale: step over par', 'Per extra step beyond the shortest ladder')}
+          ${num('melaleHint', 'Melale: hint', 'Per hint (3 per round)')}
         </div>
         <div class="panel"><h3>Krillion</h3>
           ${num('krillionPrompt', 'Seconds per prompt', 'Auto-skips when time runs out')}

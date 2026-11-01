@@ -33,7 +33,7 @@ const DEFAULT_SETTINGS = {
   rapidOthers: 10,     // buzzer round: every other team gets this off when someone is wrong
   rapidAnswer: 15,     // buzzer round: seconds to answer after buzzing
   melaleOverPar: 5,    // per step beyond the shortest possible ladder
-  melaleHint: 15,
+  melaleHint: 30,     // per Melale hint (3 per round)
   limits: Object.fromEntries(GAMES.map(g => [g.id, g.defaultLimit])),
 };
 
@@ -57,28 +57,50 @@ function freshState() {
   };
 }
 
+const isGame = g => typeof g === 'string' && GAMES.some(x => x.id === g);
+
 let state;
 try {
   state = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+  if (!state || typeof state !== 'object') throw new Error('empty state file');
+  // make sure every field and every current game exists in an older saved state
+  for (const k of ['teams', 'content', 'text', 'rounds', 'progress']) if (!state[k] || typeof state[k] !== 'object') state[k] = {};
+  if (!Array.isArray(state.adminKeys)) state.adminKeys = [];
+  if (!state.session || !state.session.code) state.session = { code: newCode(), createdAt: Date.now() };
   state.settings = { ...DEFAULT_SETTINGS, ...state.settings, limits: { ...DEFAULT_SETTINGS.limits, ...(state.settings || {}).limits } };
-  // make sure every current game exists in an older saved state
   const fresh = defaultContent();
   for (const g of GAMES) {
     if (!state.rounds[g.id]) state.rounds[g.id] = { status: 'idle' };
     if (!state.progress[g.id]) state.progress[g.id] = {};
     if (!state.content[g.id]) { state.content[g.id] = fresh.content[g.id]; state.text[g.id] = fresh.text[g.id]; }
+    if (state.text[g.id] == null) state.text[g.id] = fresh.text[g.id];
   }
-  if (state.current && !GAMES.some(g => g.id === state.current)) state.current = null;
+  if (state.current && !isGame(state.current)) state.current = null;
+  if (state.rounds.rapid.status === 'live' && !state.buzz) state.buzz = buzzer.fresh();
   console.log('Restored saved game state.');
-} catch { state = freshState(); }
+} catch (e) {
+  if (e.code !== 'ENOENT') {
+    // keep the unreadable file instead of silently overwriting the event
+    const bad = DATA_FILE.replace(/\.json$/, `.unreadable-${Date.now()}.json`);
+    try { fs.renameSync(DATA_FILE, bad); console.error(`Could not restore ${DATA_FILE} (${e.message}); kept it as ${bad}`); } catch {}
+  }
+  state = freshState();
+}
 
+// throttled (not debounced) so steady activity can't postpone saving forever;
+// write to a temp file then rename so a crash mid-write never leaves a half file
 let saveTimer = null;
-function save() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
+function writeNow() {
+  clearTimeout(saveTimer); saveTimer = null;
+  try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFile(DATA_FILE, JSON.stringify(state), () => {});
-  }, 400);
+    fs.writeFileSync(DATA_FILE + '.tmp', JSON.stringify(state));
+    fs.renameSync(DATA_FILE + '.tmp', DATA_FILE);
+  } catch (e) { console.error('Save failed:', e.message); }
+}
+function save() {
+  if (saveTimer) return;
+  saveTimer = setTimeout(writeNow, 400);
 }
 
 // ---------- scoring ----------
@@ -134,6 +156,7 @@ function sse(res) {
     'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive', 'X-Accel-Buffering': 'no',
   });
+  res.on('error', () => {}); // a write to a dropped phone connection must not become an uncaught error
   res.write('retry: 1500\n\n');
 }
 const send = (res, event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -204,13 +227,18 @@ function changed() {
   if (pushTimer) return;
   pushTimer = setTimeout(() => {
     pushTimer = null;
-    const av = adminView();
-    for (const res of adminClients) send(res, 'state', av);
+    // a bad view must never take the whole server (and the event) down
+    try {
+      const av = adminView();
+      for (const res of adminClients) send(res, 'state', av);
+    } catch (e) { console.error('admin view failed:', e); }
     for (const [tid, set] of teamClients) {
       const t = state.teams[tid];
       if (!t) continue;
-      const v = teamView(t);
-      for (const res of set) send(res, 'state', v);
+      try {
+        const v = teamView(t);
+        for (const res of set) send(res, 'state', v);
+      } catch (e) { console.error('team view failed:', tid, e); }
     }
   }, 40);
 }
@@ -224,7 +252,7 @@ function ensureProgress(game, teamId, now) {
 
 function endRound(game) {
   const r = state.rounds[game];
-  if (r.status !== 'live') return;
+  if (!r || r.status !== 'live') return;
   r.status = 'ended';
   r.endedAt = Date.now();
   if (state.current === game) state.current = game; // keep it on screen until host moves on
@@ -233,25 +261,27 @@ function endRound(game) {
 
 // server tick: timeouts and auto-end
 setInterval(() => {
-  const g = state.current;
-  if (!g) return;
-  const r = state.rounds[g];
-  if (r.status !== 'live') return;
-  const now = Date.now();
-  let dirty = false;
-  if (g === 'rapid') { if (buzzer.tick(state, now)) changed(); return; } // host-paced: no clock, no auto-end
-  if (ENGINES[g].tick) {
-    for (const p of Object.values(state.progress[g])) {
-      if (ENGINES[g].tick(state.content[g], p, state.settings, now)) {
-        if (p.status && !p.finishedAt) p.finishedAt = now;
-        dirty = true;
+  try {
+    const g = state.current;
+    if (!g) return;
+    const r = state.rounds[g];
+    if (r.status !== 'live') return;
+    const now = Date.now();
+    let dirty = false;
+    if (g === 'rapid') { if (state.buzz && buzzer.tick(state, now)) changed(); return; } // host-paced: no clock, no auto-end
+    if (ENGINES[g].tick) {
+      for (const p of Object.values(state.progress[g])) {
+        if (ENGINES[g].tick(state.content[g], p, state.settings, now)) {
+          if (p.status && !p.finishedAt) p.finishedAt = now;
+          dirty = true;
+        }
       }
     }
-  }
-  if (now >= r.endsAt) { endRound(g); return; }
-  const teamIds = Object.keys(state.teams);
-  if (teamIds.length && teamIds.every(tid => state.progress[g][tid] && state.progress[g][tid].status)) { endRound(g); return; }
-  if (dirty) changed();
+    if (now >= r.endsAt) { endRound(g); return; }
+    const teamIds = Object.keys(state.teams);
+    if (teamIds.length && teamIds.every(tid => state.progress[g][tid] && state.progress[g][tid].status)) { endRound(g); return; }
+    if (dirty) changed();
+  } catch (e) { console.error('tick failed:', e); }
 }, 250);
 
 // heartbeats keep proxies from closing idle streams
@@ -265,7 +295,12 @@ function body(req) {
   return new Promise((resolve) => {
     let data = '';
     req.on('data', c => { data += c; if (data.length > 1e6) req.destroy(); });
-    req.on('end', () => { try { resolve(JSON.parse(data || '{}')); } catch { resolve({}); } });
+    req.on('error', () => resolve({}));
+    req.on('end', () => {
+      let v = {};
+      try { v = JSON.parse(data || '{}'); } catch {}
+      resolve(v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+    });
   });
 }
 function json(res, code, obj) {
@@ -279,7 +314,7 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 function serveStatic(req, res, pathname) {
   let file = pathname === '/' ? '/index.html' : pathname === '/admin' || pathname === '/admin/' ? '/admin.html' : pathname;
   const full = path.normalize(path.join(PUBLIC, file));
-  if (!full.startsWith(PUBLIC)) { res.writeHead(403); return res.end(); }
+  if (!full.startsWith(PUBLIC + path.sep)) { res.writeHead(403); return res.end(); }
   fs.readFile(full, (err, data) => {
     if (err) { // unknown path -> player app (lets /ABCDE style links work)
       return fs.readFile(path.join(PUBLIC, 'index.html'), (e2, d2) => {
@@ -298,12 +333,12 @@ const adminActions = {
     if (!t) return;
     delete state.teams[teamId];
     for (const g of GAMES) delete state.progress[g.id][teamId];
-    if (state.buzz && state.buzz.team === teamId) { state.buzz.team = null; state.buzz.phase = 'open'; }
+    if (state.buzz) buzzer.removeTeam(state, teamId);
     for (const res of teamClients.get(teamId) || []) { send(res, 'kicked', {}); res.end(); }
     teamClients.delete(teamId);
   },
   'start-round': ({ game, limit }) => {
-    if (!ENGINES[game]) throw new Error('Unknown game');
+    if (!isGame(game)) throw new Error('Unknown game');
     if (state.current && state.rounds[state.current].status === 'live') throw new Error('Another round is live — end it first.');
     const secs = Math.max(30, Math.min(3600, Number(limit) || state.settings.limits[game]));
     const now = Date.now();
@@ -315,6 +350,8 @@ const adminActions = {
   },
   buzzer: ({ action }) => {
     if (state.current !== 'rapid' || state.rounds.rapid.status !== 'live') throw new Error('Rapid Fire is not live.');
+    if (!state.buzz) state.buzz = buzzer.fresh();
+    buzzer.tick(state, Date.now()); // settle an expired answer before the host acts on it
     buzzer.hostAction(state, state.content.rapid, action);
   },
   'end-round': ({ game }) => endRound(game || state.current),
@@ -326,6 +363,8 @@ const adminActions = {
     r.limit += Number(seconds) || 60;
   },
   'reset-round': ({ game }) => {
+    if (!isGame(game)) throw new Error('Unknown game');
+    if (state.rounds[game].status === 'live') throw new Error('End the round first.');
     if (game === 'rapid') state.buzz = null;
     state.rounds[game] = { status: 'idle' };
     state.progress[game] = {};
@@ -345,13 +384,15 @@ const adminActions = {
     }
     s.krillionPrompt = Math.max(5, s.krillionPrompt);
     s.rapidAnswer = Math.max(5, s.rapidAnswer);
-    if (settings.limits) for (const g of GAMES) if (settings.limits[g.id]) s.limits[g.id] = Math.max(30, Math.min(3600, Number(settings.limits[g.id])));
+    if (settings.limits) for (const g of GAMES) if (settings.limits[g.id] && !isNaN(settings.limits[g.id])) s.limits[g.id] = Math.max(30, Math.min(3600, Number(settings.limits[g.id])));
   },
   content: ({ game, text }) => {
-    if (!PARSERS[game]) throw new Error('Unknown game');
+    if (!isGame(game)) throw new Error('Unknown game');
     if (state.rounds[game].status === 'live') throw new Error('This round is live — end it before editing.');
+    // players' result screens for this round are built from its puzzle: swapping it now would show them the new answers
+    if (state.current === game) throw new Error('Players are still on this round — send them back to the lobby first.');
     state.content[game] = PARSERS[game](String(text || ''));
-    state.text[game] = String(text);
+    state.text[game] = String(text || '');
   },
   'reset-all': () => {
     const keys = state.adminKeys;
@@ -363,14 +404,15 @@ const adminActions = {
 };
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://x');
-  const p = url.pathname;
   try {
+    // inside the try: a malformed request line (e.g. "GET //[") makes new URL() throw
+    const url = new URL(req.url, 'http://x');
+    const p = url.pathname;
     if (p === '/events/admin') {
       if (!isAdmin(url.searchParams.get('key'))) return json(res, 401, { error: 'auth' });
       sse(res); adminClients.add(res);
       send(res, 'state', adminView());
-      req.on('close', () => adminClients.delete(res));
+      res.on('close', () => adminClients.delete(res));
       return;
     }
     if (p === '/events/team') {
@@ -381,7 +423,7 @@ const server = http.createServer(async (req, res) => {
       teamClients.get(t.id).add(res);
       send(res, 'state', teamView(t));
       changed(); // admin sees team online
-      req.on('close', () => { const s = teamClients.get(t.id); if (s) { s.delete(res); if (!s.size) teamClients.delete(t.id); } changed(); });
+      res.on('close', () => { const s = teamClients.get(t.id); if (s) { s.delete(res); if (!s.size) teamClients.delete(t.id); } changed(); });
       return;
     }
     if (p === '/api/ping') return json(res, 200, { ok: true }); // keeps free hosts awake
@@ -404,8 +446,9 @@ const server = http.createServer(async (req, res) => {
       const t = teamByToken(b.token);
       if (!t) return json(res, 401, { error: 'kicked' });
       const g = state.current;
-      if (!g || g !== b.game || state.rounds[g].status !== 'live') return json(res, 200, { ok: false, msg: 'This round is closed' });
       const now = Date.now();
+      // the 250ms tick may not have ended the round yet: don't accept moves past the limit
+      if (!g || g !== b.game || state.rounds[g].status !== 'live' || (g !== 'rapid' && now >= state.rounds[g].endsAt)) return json(res, 200, { ok: false, msg: 'This round is closed' });
       if (g === 'rapid') {
         if (!state.buzz) state.buzz = buzzer.fresh();
         if (b.action && b.action.type === 'start') return json(res, 200, { ok: true });
@@ -417,8 +460,9 @@ const server = http.createServer(async (req, res) => {
       const prog = ensureProgress(g, t.id, now);
       if (b.action && b.action.type === 'start') { changed(); return json(res, 200, { ok: true }); }
       if (prog.status) return json(res, 200, { ok: false, msg: 'Already finished' });
-      if (ENGINES[g].tick) ENGINES[g].tick(state.content[g], prog, state.settings, now);
-      const out = prog.status ? { ok: false, msg: 'Time ran out on that one' } : ENGINES[g].act(state.content[g], prog, b.action || {}, state.settings, now);
+      // if the prompt timed out just before this arrived, don't apply the answer to the *next* prompt
+      const timedOut = ENGINES[g].tick ? ENGINES[g].tick(state.content[g], prog, state.settings, now) : false;
+      const out = prog.status || timedOut ? { ok: false, msg: 'Time ran out on that one', tone: 'bad' } : ENGINES[g].act(state.content[g], prog, b.action || {}, state.settings, now);
       if (prog.status && !prog.finishedAt) prog.finishedAt = now;
       changed();
       return json(res, 200, out);
@@ -443,7 +487,7 @@ const server = http.createServer(async (req, res) => {
         try { return json(res, 200, { ok: true, puzzle: PARSERS.strands(String(b.text || '')) }); }
         catch (e) { return json(res, 200, { ok: false, error: e.message }); }
       }
-      if (!adminActions[action]) return json(res, 404, { error: 'Unknown action' });
+      if (!Object.prototype.hasOwnProperty.call(adminActions, action)) return json(res, 404, { error: 'Unknown action' });
       try { adminActions[action](b); } catch (e) { return json(res, 200, { ok: false, error: e.message }); }
       changed();
       return json(res, 200, { ok: true, content: action === 'content' ? state.content[b.game] : undefined });
@@ -455,6 +499,11 @@ const server = http.createServer(async (req, res) => {
     if (!res.headersSent) json(res, 500, { error: 'Server error' });
   }
 });
+
+// Last-resort safety net: the whole event lives in this process, so log and keep going
+// rather than exit (state is also flushed to disk so a restart can restore it).
+process.on('uncaughtException', e => { console.error('Uncaught exception:', e); writeNow(); });
+process.on('unhandledRejection', e => { console.error('Unhandled rejection:', e); });
 
 server.listen(PORT, () => {
   const nets = require('os').networkInterfaces();

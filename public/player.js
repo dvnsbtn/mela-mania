@@ -92,10 +92,18 @@
   // ---------------- realtime ----------------
   function connect() {
     if (es) es.close();
-    es = new EventSource('/events/team?token=' + encodeURIComponent(token));
+    const mine = es = new EventSource('/events/team?token=' + encodeURIComponent(token));
     es.addEventListener('state', e => { const v = JSON.parse(e.data); offset = v.now - Date.now(); view = v; render(); });
     es.addEventListener('kicked', kicked);
+    // EventSource gives up for good after an HTTP error (e.g. a 502 while the host restarts): keep retrying
+    es.onerror = () => {
+      if (mine.readyState === EventSource.CLOSED) setTimeout(() => { if (es === mine && token) connect(); }, 2000);
+    };
   }
+  // phones that slept may come back with a dead stream
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && token && (!es || es.readyState === EventSource.CLOSED)) connect();
+  });
 
   // ---------------- screens ----------------
   function shellTop() {
@@ -171,7 +179,12 @@
   function renderRound() {
     const g = view.round.game;
     if (view.needsStart) {
-      if (mounted.key !== 'starting:' + g) { setMounted({ key: 'starting:' + g }); $app.innerHTML = `${shellTop()}<div class="intro"><h2>${esc(view.round.title)}</h2><p class="muted">Loading…</p></div>`; act({ type: 'start' }); }
+      if (mounted.key !== 'starting:' + g) {
+        const k = 'starting:' + g;
+        setMounted({ key: k }); $app.innerHTML = `${shellTop()}<div class="intro"><h2>${esc(view.round.title)}</h2><p class="muted">Loading…</p></div>`;
+        // if the start request is lost (flaky phone data), try again instead of sitting on "Loading…" forever
+        act({ type: 'start' }).then(r => { if (!r || !r.ok) setTimeout(() => { if (mounted.key === k) { mounted.key = null; render(); } }, 1500); });
+      }
       return;
     }
     const key = 'round:' + g + ':' + view.round.startedAt;
@@ -233,17 +246,18 @@
       el.querySelector('#hm-kbd').addEventListener('click', async e => {
         const b = e.target.closest('button'); if (!b || b.disabled) return;
         b.disabled = true;
-        const r = await act({ type: 'letter', letter: b.dataset.l });
+        const r = await act({ type: 'letter', letter: b.dataset.l, i: this.idx });
         if (r.msg) toast(r.msg, r.tone);
       });
       el.querySelector('#hm-solve').addEventListener('submit', async e => {
         e.preventDefault();
         const inp = e.target.querySelector('input'); if (!inp.value.trim()) return;
-        const r = await act({ type: 'solve', text: inp.value });
+        const r = await act({ type: 'solve', text: inp.value, i: this.idx });
         if (r.msg) toast(r.msg, r.tone);
         inp.value = '';
       });
       this.keyHandler = e => {
+        if (e.metaKey || e.ctrlKey || e.altKey) return; // e.g. Ctrl/Cmd+R must not guess "R"
         if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
         if (/^[a-z]$/i.test(e.key)) { const b = el.querySelector(`[data-l="${e.key.toUpperCase()}"]`); if (b && !b.disabled) b.click(); }
       };
@@ -252,6 +266,7 @@
     unmount() { document.removeEventListener('keydown', this.keyHandler); },
     update(v) {
       const el = this.el;
+      this.idx = v.index;
       el.querySelector('#hm-prog').textContent = `Word ${v.index + 1} of ${v.total}`;
       el.querySelector('#hm-lives').innerHTML = Array.from({ length: v.maxWrong }, (_, i) => `<i class="${i < v.wrong ? 'lost' : ''}"></i>`).join('');
       el.querySelectorAll('.part').forEach((p, i) => p.classList.toggle('on', i < v.wrong));
@@ -332,14 +347,29 @@
       el.innerHTML = `
         <div class="sub"><span id="ml-n"></span><span id="ml-par"></span></div>
         <div class="ml-board" id="ml-board"></div>
-        <div class="row-btns"><button class="btn ghost small" id="ml-undo">Undo</button></div>
+        <div class="row-btns"><button class="btn ghost small" id="ml-undo">Undo</button><button class="btn ghost small" id="ml-hint">Hint</button></div>
         <div class="wd-kbd" id="ml-kbd">${rows.map(r => `<div class="r">${r.split('').map(c => c === '+' ? '<button class="wide" data-k="Enter">ENTER</button>' : c === '-' ? '<button class="wide" data-k="Backspace">⌫</button>' : `<button data-k="${c}">${c}</button>`).join('')}</div>`).join('')}</div>`;
       el.querySelector('#ml-kbd').addEventListener('click', e => { const b = e.target.closest('button'); if (b) this.key(b.dataset.k); });
       el.querySelector('#ml-undo').onclick = async () => { this.typed = ''; const r = await act({ type: 'undo' }); if (r.msg) toast(r.msg, r.tone); };
+      el.querySelector('#ml-hint').onclick = async () => {
+        const v = this.v; if (!v || this.busy || !v.hintsLeft) return;
+        const hb = el.querySelector('#ml-hint');
+        if (!this.armed) { // two taps, so a stray tap never costs time
+          this.armed = true; hb.textContent = `Tap again: +${v.hintCost}s`; hb.classList.add('armed');
+          clearTimeout(this.armT); this.armT = setTimeout(() => { this.armed = false; this.draw(); }, 3000);
+          return;
+        }
+        this.armed = false; clearTimeout(this.armT);
+        this.busy = true; this.typed = '';
+        const r = await act({ type: 'hint' });
+        this.busy = false;
+        if (r.msg) toast(r.msg, r.ok ? (r.tone || 'good') : 'bad');
+        this.draw();
+      };
       this.keyHandler = e => { if (e.metaKey || e.ctrlKey || (e.target && e.target.tagName === 'INPUT')) return; if (e.key === 'Enter' || e.key === 'Backspace' || /^[a-z]$/i.test(e.key)) { e.preventDefault(); this.key(e.key.length === 1 ? e.key.toUpperCase() : e.key); } };
       document.addEventListener('keydown', this.keyHandler);
     },
-    unmount() { document.removeEventListener('keydown', this.keyHandler); },
+    unmount() { document.removeEventListener('keydown', this.keyHandler); clearTimeout(this.armT); },
     async key(k) {
       const v = this.v; if (!v || this.busy || !v.start) return;
       const n = v.target.length;
@@ -380,6 +410,9 @@
       board.innerHTML = html;
       board.scrollTop = board.scrollHeight;
       el.querySelector('#ml-undo').disabled = v.chain.length <= gc;
+      const hb = el.querySelector('#ml-hint'), hl = v.hintsLeft != null ? v.hintsLeft : 0;
+      if (!this.armed) { hb.textContent = `Hint · ${hl} left (+${v.hintCost || 0}s)`; hb.classList.remove('armed'); }
+      hb.disabled = hl <= 0;
     },
   };
 
@@ -542,12 +575,12 @@
       const f = el.querySelector('#kr-f'), inp = el.querySelector('#kr-in');
       f.addEventListener('submit', async e => {
         e.preventDefault(); if (!inp.value.trim()) return;
-        const r = await act({ type: 'answer', text: inp.value });
+        const r = await act({ type: 'answer', text: inp.value, i: this.v ? this.v.index : undefined });
         if (r.ok) { inp.value = ''; toast(`${r.msg} · ${r.tier.toUpperCase()}`, 'good'); }
         else if (r.msg) toast(r.msg, 'bad');
         inp.focus();
       });
-      el.querySelector('#kr-skip').onclick = async () => { const r = await act({ type: 'skip' }); if (r.msg) toast(r.msg, r.tone); inp.value = ''; inp.focus(); };
+      el.querySelector('#kr-skip').onclick = async () => { const r = await act({ type: 'skip', i: this.v ? this.v.index : undefined }); if (r.msg) toast(r.msg, r.tone); inp.value = ''; inp.focus(); };
       setTimeout(() => inp.focus(), 50);
     },
     update(v) {
@@ -605,7 +638,7 @@
         const bz = el.querySelector('#bz');
         if (bz) bz.onclick = async () => {
           bz.disabled = true; bz.textContent = '…';
-          const r = await act({ type: 'buzz' });
+          const r = await act({ type: 'buzz', q: v.q });
           if (r.ok && navigator.vibrate) navigator.vibrate(120);
           if (r.msg) toast(r.msg, r.ok ? 'good' : 'bad');
           if (!r.ok) { bz.disabled = false; bz.textContent = 'BUZZ'; }
@@ -613,7 +646,7 @@
         const f = el.querySelector('#bz-f');
         if (f) {
           const inp = f.querySelector('input'); setTimeout(() => inp.focus(), 30);
-          f.onsubmit = async e => { e.preventDefault(); if (!inp.value.trim()) return; f.querySelector('button').disabled = true; const r = await act({ type: 'answer', text: inp.value }); if (r.msg) toast(r.msg, r.tone); };
+          f.onsubmit = async e => { e.preventDefault(); if (!inp.value.trim()) return; f.querySelector('button').disabled = true; const r = await act({ type: 'answer', text: inp.value }); if (r.msg) toast(r.msg, r.tone); else if (!r.ok) f.querySelector('button').disabled = false; /* request lost: let them resend */ };
         }
       }
     },
