@@ -239,3 +239,7 @@ body.present .team .x { display: none; }
 .bz-judge { font-size: 20px; padding: 16px 28px; }
 .btn small { opacity: .55; font-family: var(--mono); font-size: 11px; margin-left: 6px; }
 .bz-keys { margin-top: 8px; font-size: 13px; color: var(--ink-3); }
+#restore-bar { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); z-index: 60; width: min(760px, calc(100% - 32px)); display: flex; gap: 18px; align-items: center; justify-content: space-between; padding: 16px 18px; border-radius: 16px; background: var(--panel-2); border: 1px solid color-mix(in srgb, var(--rapid, #F2C14E) 60%, var(--line)); box-shadow: 0 20px 60px rgba(0,0,0,.45); font-size: 14px; color: var(--ink-2); }
+#restore-bar b { color: var(--ink); }
+#restore-bar .btns { flex-shrink: 0; }
+@media (max-width: 700px) { #restore-bar { flex-direction: column; align-items: stretch; } }

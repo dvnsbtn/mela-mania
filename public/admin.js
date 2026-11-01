@@ -84,6 +84,7 @@
       if (!prev) buildShell();
       if (prev && S.current && S.rounds[S.current].status === 'live' && (!prev.current || prev.rounds[S.current].status !== 'live')) view = 'live';
       render();
+      backupCheck();
     });
     // EventSource stops for good after an HTTP error (e.g. 502 while the host wakes/restarts): check auth, else keep retrying
     es.onerror = () => {
@@ -96,6 +97,55 @@
       } else if (mine.readyState === EventSource.CLOSED) retry();
     };
   }
+
+  // ---------------- browser backup ----------------
+  // Free hosting wipes the server's disk on every restart or deploy. This browser keeps a copy of
+  // the whole game (teams, scores, puzzles, settings) and puts it back when it sees a fresh server.
+  const BK = 'mg_backup';
+  let bkTimer = null, bkSkip = null, restoring = false;
+  function readBackup() { try { return JSON.parse(localStorage.getItem(BK) || 'null'); } catch { return null; } }
+  function describe(b) {
+    const teams = Object.keys(b.teams || {}).length;
+    const played = S.games.filter(g => b.rounds && b.rounds[g.id] && b.rounds[g.id].status !== 'idle').map(g => g.title);
+    return `${teams} team${teams === 1 ? '' : 's'}${played.length ? ' · played: ' + played.join(', ') : ''} · your puzzles and settings`;
+  }
+  function backupCheck() {
+    if (!S) return;
+    const local = readBackup();
+    const usable = local && local.backup && local.backup.touched && local.bootId !== S.bootId;
+    if (S.pristine && usable) {
+      if (restoring || bkSkip === S.bootId) return;
+      // a recent backup goes straight back in; an old one (e.g. yesterday's test) asks first
+      if (Date.now() - local.at < 6 * 3600e3) { doRestore(local, true); return; }
+      showRestoreBar(local); return;
+    }
+    hideRestoreBar();
+    if (S.pristine || bkTimer) return;
+    bkTimer = setTimeout(saveBackup, 2500);
+  }
+  async function saveBackup() {
+    bkTimer = null;
+    try {
+      const r = await fetch('/api/admin/backup?key=' + encodeURIComponent(key), { cache: 'no-store' });
+      if (r.ok) localStorage.setItem(BK, await r.text());
+    } catch {}
+  }
+  async function doRestore(local, auto) {
+    restoring = true; hideRestoreBar();
+    const r = await api('restore', { backup: local.backup });
+    restoring = false;
+    if (r && r.ok) toast(auto ? 'Server restarted — game restored from this browser' : 'Backup restored');
+    else bkSkip = S && S.bootId;
+  }
+  function showRestoreBar(local) {
+    let bar = document.getElementById('restore-bar');
+    if (!bar) { bar = document.createElement('div'); bar.id = 'restore-bar'; document.body.appendChild(bar); }
+    bar.innerHTML = `<div><b>The server restarted and lost its data.</b> This browser has a backup from ${new Date(local.at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}: ${esc(describe(local.backup))}.</div>
+      <div class="btns"><button class="btn go" id="rb-yes">Restore backup</button><button class="btn ghost" id="rb-no">Start fresh</button></div>`;
+    bar.querySelector('#rb-yes').onclick = () => doRestore(local, false);
+    bar.querySelector('#rb-no').onclick = () => { bkSkip = S.bootId; hideRestoreBar(); };
+  }
+  function hideRestoreBar() { const bar = document.getElementById('restore-bar'); if (bar) bar.remove(); }
 
   // ---------------- shell ----------------
   const NAV = [['join', 'Join screen', 'J'], ['rounds', 'Rounds', 'R'], ['live', 'Live round', 'L'], ['board', 'Leaderboard', 'B'], ['puzzles', 'Puzzles', ''], ['settings', 'Settings', '']];
@@ -269,6 +319,7 @@
   function renderLive(stage) {
     const id = S.current;
     if (!id) {
+      stage.dataset.key = ''; // so a round coming back (e.g. a restored backup) rebuilds the live screen
       stage.innerHTML = `<div class="head"><div><div class="eyebrow">Live round</div><h1 class="h1">Nothing live right now</h1></div></div>
         <div class="empty">Start a round from the Rounds screen and it'll show up here with a big timer and every team's progress.<br><br><button class="btn ctl" id="tor">Go to rounds</button></div>`;
       stage.querySelector('#tor').onclick = () => go('rounds');
@@ -528,6 +579,10 @@
           ${num('krillionDeep', 'Deep answer credit', 'Seconds taken off')}
           ${num('krillionAbyss', 'Abyss answer credit', 'Seconds taken off')}
         </div>
+        <div class="panel"><h3>Backup</h3>
+          <p style="color:var(--ink-2);font-size:14px;margin:0 0 14px">This browser saves a copy of the whole game (teams, scores, puzzles, settings) every few seconds and restores it automatically if the server restarts. You can also keep a file copy.</p>
+          <div class="btns"><button class="btn ghost" id="bk-dl">Download backup file</button><button class="btn ghost" id="bk-ul">Restore from file…</button><input type="file" id="bk-file" accept=".json,application/json" hidden></div>
+        </div>
         <div class="panel"><h3>Danger zone</h3>
           <p style="color:var(--ink-2);font-size:14px;margin:0 0 14px">Starts a brand-new session: new code, all teams removed, all times cleared. Your puzzles and settings are kept.</p>
           <div class="btns"><button class="btn danger" id="reset">Reset everything</button><button class="btn ghost" id="logout">Log out</button></div>
@@ -541,6 +596,22 @@
     };
     stage.querySelector('#reset').onclick = async () => { if (confirm('Reset everything? All teams and times will be cleared.') && confirm('Really? This cannot be undone.')) { await api('reset-all'); toast('New session started'); go('join'); } };
     stage.querySelector('#logout').onclick = logout;
+    stage.querySelector('#bk-dl').onclick = async () => {
+      await saveBackup();
+      const data = localStorage.getItem(BK); if (!data) return toast('Nothing to back up yet', true);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+      a.download = `mela-mania-backup-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`;
+      a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    };
+    const file = stage.querySelector('#bk-file');
+    stage.querySelector('#bk-ul').onclick = () => file.click();
+    file.onchange = async () => {
+      const f = file.files[0]; file.value = ''; if (!f) return;
+      let local; try { local = JSON.parse(await f.text()); } catch { return toast('That file is not a backup', true); }
+      if (!local || !local.backup) return toast('That file is not a backup', true);
+      if (confirm(`Replace the current game with this backup?\n${describe(local.backup)}`)) doRestore(local, false);
+    };
   }
 
   // ---------------- confetti ----------------

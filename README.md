@@ -65,3 +65,12 @@ Rapid Fire is a host-paced buzzer round instead: you press **Next question** (N)
 Host console → **Puzzles**. Each game has a simple text format with instructions beside it. Strands builds its grid for you (letters must total exactly 48). Answers stay on the server, so players can't peek.
 
 Game state is saved to `data/state.json`, so a restart doesn't lose teams or times. Delete that file to start completely fresh.
+
+## If the server restarts (Render free tier)
+
+Render wipes the server's disk whenever it restarts, sleeps or redeploys. To make that harmless, the host console keeps a copy of the whole game (teams, scores, puzzles, settings) in your browser every few seconds. When it sees a fresh server it puts the game back by itself within a couple of seconds, and players' phones wait and reconnect. Host logins also survive restarts.
+
+- Keep the host console open on the same browser during the event, since that's where the backup lives.
+- Settings → Backup lets you download a backup file and restore from one, for example to move to another laptop.
+- A backup more than 6 hours old isn't restored automatically. You'll be asked first.
+

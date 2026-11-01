@@ -54,15 +54,18 @@ function freshState() {
     progress: Object.fromEntries(GAMES.map(g => [g.id, {}])),
     current: null,
     adminKeys: [],
+    touched: false, // becomes true once anything real happens (a join, any host action)
   };
 }
 
+// a new id every time the process starts: lets the host's browser notice a restart
+const BOOT_ID = id(8);
+
 const isGame = g => typeof g === 'string' && GAMES.some(x => x.id === g);
 
-let state;
-try {
-  state = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-  if (!state || typeof state !== 'object') throw new Error('empty state file');
+// fill in anything missing from a saved file or a browser backup (older versions, partial data)
+function normalize(state) {
+  if (!state || typeof state !== 'object') throw new Error('empty state');
   // make sure every field and every current game exists in an older saved state
   for (const k of ['teams', 'content', 'text', 'rounds', 'progress']) if (!state[k] || typeof state[k] !== 'object') state[k] = {};
   if (!Array.isArray(state.adminKeys)) state.adminKeys = [];
@@ -77,6 +80,13 @@ try {
   }
   if (state.current && !isGame(state.current)) state.current = null;
   if (state.rounds.rapid.status === 'live' && !state.buzz) state.buzz = buzzer.fresh();
+  if (state.touched == null) state.touched = true;
+  return state;
+}
+
+let state;
+try {
+  state = normalize(JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')));
   console.log('Restored saved game state.');
 } catch (e) {
   if (e.code !== 'ENOENT') {
@@ -178,6 +188,7 @@ function adminView() {
   }) : [];
   return {
     now: Date.now(),
+    bootId: BOOT_ID, pristine: !state.touched,
     session: state.session,
     settings: state.settings,
     lan: LAN(),
@@ -294,7 +305,7 @@ setInterval(() => {
 function body(req) {
   return new Promise((resolve) => {
     let data = '';
-    req.on('data', c => { data += c; if (data.length > 1e6) req.destroy(); });
+    req.on('data', c => { data += c; if (data.length > 8e6) req.destroy(); });
     req.on('error', () => resolve({}));
     req.on('end', () => {
       let v = {};
@@ -308,7 +319,14 @@ function json(res, code, obj) {
   res.end(JSON.stringify(obj));
 }
 const teamByToken = tok => Object.values(state.teams).find(t => t.token === tok);
-const isAdmin = key => key && state.adminKeys.includes(key);
+// host keys are signed with the password, so they stay valid when the server restarts and loses its disk
+const sign = nonce => crypto.createHmac('sha256', 'mela-admin:' + ADMIN_PASSWORD).update(nonce).digest('base64url');
+function isAdmin(key) {
+  if (typeof key !== 'string' || key.length > 200) return false;
+  const [nonce, sig] = key.split('.');
+  if (nonce && sig) { const want = sign(nonce); return sig.length === want.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want)); }
+  return state.adminKeys.includes(key); // keys issued before this change
+}
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
 function serveStatic(req, res, pathname) {
@@ -394,12 +412,22 @@ const adminActions = {
     state.content[game] = PARSERS[game](String(text || ''));
     state.text[game] = String(text || '');
   },
+  // put back a backup kept by the host's browser (after Render restarts and wipes the disk)
+  restore: ({ backup }) => {
+    const s = normalize(JSON.parse(JSON.stringify(backup || null)));
+    if (!s.content || !s.teams) throw new Error('That is not a Mela Mania backup.');
+    for (const g of GAMES) if (!s.content[g.id]) throw new Error('Backup is missing ' + g.title + '.');
+    for (const set of teamClients.values()) for (const res of set) res.end(); // they reconnect against the restored teams
+    teamClients.clear();
+    state = { ...s, adminKeys: state.adminKeys, touched: true };
+    delete state.backupOf;
+  },
   'reset-all': () => {
     const keys = state.adminKeys;
     for (const set of teamClients.values()) for (const res of set) { send(res, 'kicked', {}); res.end(); }
     teamClients.clear();
     const keepContent = { content: state.content, text: state.text, settings: state.settings };
-    state = { ...freshState(), ...keepContent, adminKeys: keys };
+    state = { ...freshState(), ...keepContent, adminKeys: keys, touched: true };
   },
 };
 
@@ -418,7 +446,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/events/team') {
       const t = teamByToken(url.searchParams.get('token'));
       sse(res);
-      if (!t) { send(res, 'kicked', {}); return res.end(); }
+      // fresh server after a restart: don't throw players out before the host has had a chance to restore
+      if (!t) { send(res, state.touched ? 'kicked' : 'restoring', {}); return res.end(); }
       if (!teamClients.has(t.id)) teamClients.set(t.id, new Set());
       teamClients.get(t.id).add(res);
       send(res, 'state', teamView(t));
@@ -438,13 +467,14 @@ const server = http.createServer(async (req, res) => {
       if (Object.keys(state.teams).length >= 200) return json(res, 400, { error: 'This session is full.' });
       const t = { id: id(6), token: id(18), name, joinedAt: Date.now() };
       state.teams[t.id] = t;
+      state.touched = true;
       changed();
       return json(res, 200, { token: t.token });
     }
     if (req.method === 'POST' && p === '/api/action') {
       const b = await body(req);
       const t = teamByToken(b.token);
-      if (!t) return json(res, 401, { error: 'kicked' });
+      if (!t) return state.touched ? json(res, 401, { error: 'kicked' }) : json(res, 503, { error: 'The host is restoring the game — hang on.' });
       const g = state.current;
       const now = Date.now();
       // the 250ms tick may not have ended the round yet: don't accept moves past the limit
@@ -470,16 +500,18 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && p === '/api/admin/login') {
       const b = await body(req);
       if (String(b.password || '') !== ADMIN_PASSWORD) return json(res, 401, { error: 'Wrong password' });
-      const key = id(24);
-      state.adminKeys = [...(state.adminKeys || []).slice(-9), key];
-      save();
-      return json(res, 200, { key });
+      const nonce = id(18);
+      return json(res, 200, { key: nonce + '.' + sign(nonce) });
     }
     if (p.startsWith('/api/admin/')) {
       const b = req.method === 'POST' ? await body(req) : {};
       const key = b.key || url.searchParams.get('key');
       if (!isAdmin(key)) return json(res, 401, { error: 'auth' });
       const action = p.slice('/api/admin/'.length);
+      if (action === 'backup' && req.method === 'GET') {
+        const { adminKeys, ...rest } = state;
+        return json(res, 200, { bootId: BOOT_ID, at: Date.now(), backup: rest });
+      }
       if (action === 'content' && req.method === 'GET') {
         return json(res, 200, { text: state.text, content: state.content });
       }
@@ -489,6 +521,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (!Object.prototype.hasOwnProperty.call(adminActions, action)) return json(res, 404, { error: 'Unknown action' });
       try { adminActions[action](b); } catch (e) { return json(res, 200, { ok: false, error: e.message }); }
+      state.touched = true;
       changed();
       return json(res, 200, { ok: true, content: action === 'content' ? state.content[b.game] : undefined });
     }

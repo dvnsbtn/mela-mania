@@ -37,6 +37,7 @@
     try {
       const r = await fetch('/api/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, game: view.round.game, action }) });
       if (r.status === 401) { kicked(); return {}; }
+      if (r.status === 503) { toast('Reconnecting — the host is restoring the game', 'bad'); return {}; }
       return await r.json();
     } catch { toast('Connection hiccup — try again', 'bad'); return {}; }
   }
@@ -95,6 +96,13 @@
     const mine = es = new EventSource('/events/team?token=' + encodeURIComponent(token));
     es.addEventListener('state', e => { const v = JSON.parse(e.data); offset = v.now - Date.now(); view = v; render(); });
     es.addEventListener('kicked', kicked);
+    // the server restarted and the host hasn't restored the game yet: keep our team and try again
+    es.addEventListener('restoring', () => {
+      mine.close();
+      if (!view) $app.innerHTML = '<div class="join"><div class="card"><h2>Reconnecting…</h2><p class="muted">The host is restoring the game. Keep this page open.</p></div></div>';
+      else toast('Reconnecting…', 'bad');
+      setTimeout(() => { if (es === mine && token) connect(); }, 3000);
+    });
     // EventSource gives up for good after an HTTP error (e.g. a 502 while the host restarts): keep retrying
     es.onerror = () => {
       if (mine.readyState === EventSource.CLOSED) setTimeout(() => { if (es === mine && token) connect(); }, 2000);
