@@ -1,5 +1,5 @@
 {
-  "name": "mini-games-showdown",
+  "name": "mela-mania",
   "version": "1.0.0",
   "description": "Live team mini-games (Hangman, Connections, Wordle, Krillion, Strands, Rapid Fire) with a host console and timed leaderboard",
   "main": "server.js",

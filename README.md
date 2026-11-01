@@ -1,4 +1,6 @@
-# Mini Games Showdown
+# Mela Mania
+
+**M**ovies · **E**ntertainment · **L**iterature · **A**rt — a live team trivia event.
 
 Teams join on their phones with a session code, play six timed mini games, and the host console adds up every team's time. Lowest total wins.
 

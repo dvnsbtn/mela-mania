@@ -1,4 +1,4 @@
-// Mini Games Showdown — zero-dependency Node server.
+// Mela Mania — zero-dependency Node server.
 // Run:  node server.js     (needs Node 18+)
 // Env:  PORT (default 3000), ADMIN_PASSWORD (default "host123")
 
@@ -16,7 +16,8 @@ const DATA_FILE = path.join(DATA_DIR, 'state.json');
 const PUBLIC = path.join(__dirname, 'public');
 
 const DEFAULT_SETTINGS = {
-  eventName: 'Mini Games Showdown',
+  eventName: 'Mela Mania',
+  tagline: 'Movies · Entertainment · Literature · Art',
   joinUrl: '',         // optional override for the link/QR shown on the join screen
   dnfPenalty: 60,      // added on top of the time limit if a team doesn't finish
   hangmanMiss: 30,     // running out of lives on a word
@@ -153,6 +154,7 @@ function teamView(t) {
     now: Date.now(),
     team: { id: t.id, name: t.name },
     eventName: state.settings.eventName,
+    tagline: state.settings.tagline,
     code: state.session.code,
     history: GAMES.map(g => ({ id: g.id, title: g.title, result: teamRoundResult(g.id, t.id) })).filter(h => h.result && h.result.time != null),
   };
@@ -303,6 +305,7 @@ const adminActions = {
   settings: ({ settings }) => {
     const s = state.settings;
     if (typeof settings.eventName === 'string') s.eventName = settings.eventName.slice(0, 60) || s.eventName;
+    if (typeof settings.tagline === 'string') s.tagline = settings.tagline.slice(0, 80);
     if (typeof settings.joinUrl === 'string') s.joinUrl = settings.joinUrl.trim().replace(/\/+$/, '').slice(0, 200);
     for (const k of ['dnfPenalty', 'hangmanMiss', 'strandsHint', 'krillionPrompt', 'krillionSkip', 'krillionDeep', 'krillionAbyss', 'rapidSkip']) {
       if (settings[k] != null && !isNaN(settings[k])) s[k] = Math.max(0, Math.min(3600, Number(settings[k])));
@@ -348,6 +351,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (p === '/api/ping') return json(res, 200, { ok: true }); // keeps free hosts awake
+    if (p === '/api/info') return json(res, 200, { eventName: state.settings.eventName, tagline: state.settings.tagline });
     if (req.method === 'POST' && p === '/api/join') {
       const b = await body(req);
       const code = String(b.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -413,7 +417,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   const nets = require('os').networkInterfaces();
   const ips = Object.values(nets).flat().filter(n => n && n.family === 'IPv4' && !n.internal).map(n => n.address);
-  console.log(`\n  Mini Games Showdown is running\n`);
+  console.log(`\n  Mela Mania is running\n`);
   console.log(`  Admin:   http://localhost:${PORT}/admin   (password: ${ADMIN_PASSWORD === 'host123' ? 'host123 — set ADMIN_PASSWORD to change' : 'from ADMIN_PASSWORD'})`);
   console.log(`  Players: http://localhost:${PORT}`);
   ips.forEach(ip => console.log(`           http://${ip}:${PORT}   (same Wi-Fi)`));

@@ -48,11 +48,11 @@
     const pathCode = location.pathname.replace(/\//g, '').toUpperCase();
     const code = params.get('code') || (/^[A-Z0-9]{5}$/.test(pathCode) ? pathCode : '');
     $app.innerHTML = `
-      <div class="top"><div class="brand"><div class="logo"><i></i><i></i><i></i><i></i></div>Mini Games Showdown</div></div>
+      <div class="top"><div class="brand"><div class="logo"><i>M</i><i>E</i><i>L</i><i>A</i></div><span id="evname">Mela Mania</span></div></div>
       <div class="join">
         <h1>Gather your team.<br><em>Beat the clock.</em></h1>
         <div class="chips">
-          ${['Hangman:hangman', 'Connections:connections', 'Wordle:wordle', 'Krillion:krillion', 'Strands:strands', 'Rapid Fire:rapid'].map(x => { const [n, k] = x.split(':'); return `<span class="chip"><b style="background:${GAME_COLOR[k]}"></b>${n}</span>`; }).join('')}
+          ${[['M', 'Movies', 'wordle'], ['E', 'Entertainment', 'rapid'], ['L', 'Literature', 'connections'], ['A', 'Art', 'hangman']].map(([l, n, k]) => `<span class="chip"><b style="background:${GAME_COLOR[k]}">${l}</b>${n}</span>`).join('')}
         </div>
         <form id="jf" autocomplete="off">
           <div><label class="label" for="code">Session code</label>
@@ -65,6 +65,7 @@
       </div>`;
     const f = document.getElementById('jf');
     (code ? f.name : f.code).focus();
+    fetch('/api/info').then(r => r.json()).then(i => { const e = document.getElementById('evname'); if (e && i.eventName) { e.textContent = i.eventName; document.title = 'Join ' + i.eventName; } }).catch(() => {});
     f.code.addEventListener('input', () => { f.code.value = f.code.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
     f.addEventListener('submit', async e => {
       e.preventDefault();
@@ -98,7 +99,7 @@
 
   // ---------------- screens ----------------
   function shellTop() {
-    return `<div class="top"><div class="brand"><div class="logo"><i></i><i></i><i></i><i></i></div>${esc(view.eventName)}</div><div class="team-pill">${esc(view.team.name)}</div></div>`;
+    return `<div class="top"><div class="brand"><div class="logo"><i>M</i><i>E</i><i>L</i><i>A</i></div>${esc(view.eventName)}</div><div class="team-pill">${esc(view.team.name)}</div></div>`;
   }
 
   function render() {

@@ -49,7 +49,7 @@
   // ---------------- auth ----------------
   function renderLogin(err) {
     $app.innerHTML = `<div class="login"><form id="lf">
-      <div class="brand" style="padding:0"><div class="logo"><i></i><i></i><i></i><i></i></div>Host Console</div>
+      <div class="brand" style="padding:0"><div class="logo"><i>M</i><i>E</i><i>L</i><i>A</i></div>Host Console</div>
       <h1>Ready to run the show?</h1>
       <input class="field" type="password" id="pw" placeholder="Host password" autofocus>
       <button class="btn big" style="justify-content:center">Enter console</button>
@@ -86,7 +86,7 @@
     $app.innerHTML = `
       <div class="shell">
         <aside class="side">
-          <div class="brand"><div class="logo"><i></i><i></i><i></i><i></i></div><span id="ev"></span></div>
+          <div class="brand"><div class="logo"><i>M</i><i>E</i><i>L</i><i>A</i></div><span id="ev"></span></div>
           <nav class="nav" id="nav">${NAV.map(([id, label, k]) => `<button data-v="${id}">${NAVICON[id]}${label}${id === 'live' ? '<span class="live-dot" id="ldot" hidden></span>' : k ? `<kbd>${k}</kbd>` : ''}</button>`).join('')}</nav>
           <div class="side-code"><small>Session code</small><b id="sc"></b>
             <div class="row"><span id="tc"></span><button class="btn ghost" style="height:30px;padding:0 10px;font-size:12px" id="newcode">New code</button></div></div>
@@ -149,10 +149,11 @@
     const base = joinBase();
     const display = base.replace(/^https?:\/\//, '');
     const link = base + '/?code=' + S.session.code;
-    if (mountedView !== 'join' || stage.dataset.code !== S.session.code || stage.dataset.base !== base) {
-      stage.dataset.code = S.session.code; stage.dataset.base = base;
+    const sig = [S.session.code, base, S.settings.eventName, S.settings.tagline].join('|');
+    if (mountedView !== 'join' || stage.dataset.sig !== sig) {
+      stage.dataset.sig = sig;
       stage.innerHTML = `
-        <div class="head"><div><div class="eyebrow">${esc(S.settings.eventName)}</div><h1 class="h1">Join the game</h1></div>
+        <div class="head"><div><div class="eyebrow">${esc(S.settings.tagline || 'Join the game')}</div><h1 class="h1">${esc(S.settings.eventName)}</h1></div>
           <div class="btns ctl"><button class="btn ghost" id="copy">Copy join link</button><button class="btn" id="tor">Go to rounds →</button></div></div>
         <div class="join-grid">
           <div class="join-card">
@@ -405,6 +406,7 @@
       <div class="settings">
         <div class="panel"><h3>Event</h3>
           <div class="srow" style="grid-template-columns:1fr"><label>Event name<small>Shown on players' phones and here</small></label><input id="s-name" value="${esc(s.eventName)}" style="text-align:left;padding:0 12px;font-family:var(--body)"></div>
+          <div class="srow" style="grid-template-columns:1fr"><label>Tagline<small>Shown above the event name on the join screen</small></label><input id="s-tag" value="${esc(s.tagline || '')}" style="text-align:left;padding:0 12px;font-family:var(--body)"></div>
           <div class="srow" style="grid-template-columns:1fr"><label>Join link override<small>Leave blank to auto-detect. Detected: ${esc(joinBase())}</small></label><input id="s-url" value="${esc(s.joinUrl)}" placeholder="https://your-site.onrender.com" style="text-align:left;padding:0 12px;font-family:var(--body)"></div>
         </div>
         <div class="panel"><h3>Penalties (seconds)</h3>
@@ -425,7 +427,7 @@
         </div>
       </div>`;
     stage.querySelector('#ssave').onclick = async () => {
-      const settings = { eventName: stage.querySelector('#s-name').value, joinUrl: stage.querySelector('#s-url').value };
+      const settings = { eventName: stage.querySelector('#s-name').value, tagline: stage.querySelector('#s-tag').value, joinUrl: stage.querySelector('#s-url').value };
       stage.querySelectorAll('[data-k]').forEach(i => settings[i.dataset.k] = Number(i.value));
       const r = await api('settings', { settings });
       if (r.ok) { toast('Settings saved'); mountedView = null; setTimeout(render, 100); }
