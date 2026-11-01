@@ -620,10 +620,9 @@
             ? `<div class="bz-note bad">You answered wrong — you're out for this one.</div>`
             : `<button class="bz-btn" id="bz">BUZZ</button>`;
           else if (v.phase === 'answering' && mine) action = `
-            <form id="bz-f" class="bz-answer"><div class="bz-timer"><i id="bz-bar"></i></div>
-              <input class="field" id="bz-in" placeholder="Your answer" autocomplete="off" spellcheck="false">
-              <button class="btn block">Submit answer</button></form>`;
-          else if (v.phase === 'answering') action = `<div class="bz-note"><b>${esc(v.teamName)}</b> buzzed first and is answering…</div>`;
+            <div class="bz-answer"><div class="bz-note good" style="font-size:20px">🎤 You buzzed first!<br><b>Say your answer out loud</b></div>
+              <div class="bz-timer"><i id="bz-bar"></i></div><p class="muted" style="text-align:center;margin:6px 0 0">The host will mark it right or wrong.</p></div>`;
+          else if (v.phase === 'answering') action = `<div class="bz-note"><b>${esc(v.teamName)}</b> buzzed first and is answering out loud…</div>`;
           else if (v.phase === 'closed') {
             const r = v.result || {};
             action = r.type === 'correct'
@@ -631,7 +630,7 @@
               : `<div class="bz-note">Nobody got it. Answer: <b>${esc(v.answer)}</b></div>`;
           }
           const lastWrong = v.last && v.last.type === 'wrong' && v.phase !== 'closed' && !v.last.overruled
-            ? `<div class="bz-last">✗ ${esc(v.last.teamName)} said “${esc(v.last.text)}” — ${v.last.team === v.me ? secs(v.rules.wrong) + ' for you' : secs(-v.rules.others) + ' for you!'}</div>` : '';
+            ? `<div class="bz-last">✗ ${esc(v.last.teamName)}${v.last.text ? ` said “${esc(v.last.text)}”` : ' was wrong'} — ${v.last.team === v.me ? secs(v.rules.wrong) + ' for you' : secs(-v.rules.others) + ' for you!'}</div>` : '';
           body = `<div class="rf-card"><small>Question ${v.q + 1} of ${v.total}</small><p>${esc(v.question)}</p></div>${lastWrong}${action}`;
         }
         el.innerHTML = `<div class="sub"><span>Right ${secs(-v.rules.correct)} · Wrong ${secs(v.rules.wrong)}</span></div>${body}`;
@@ -643,11 +642,6 @@
           if (r.msg) toast(r.msg, r.ok ? 'good' : 'bad');
           if (!r.ok) { bz.disabled = false; bz.textContent = 'BUZZ'; }
         };
-        const f = el.querySelector('#bz-f');
-        if (f) {
-          const inp = f.querySelector('input'); setTimeout(() => inp.focus(), 30);
-          f.onsubmit = async e => { e.preventDefault(); if (!inp.value.trim()) return; f.querySelector('button').disabled = true; const r = await act({ type: 'answer', text: inp.value }); if (r.msg) toast(r.msg, r.tone); else if (!r.ok) f.querySelector('button').disabled = false; /* request lost: let them resend */ };
-        }
       }
     },
     tick() {

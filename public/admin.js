@@ -126,6 +126,10 @@
     const k = e.key.toLowerCase();
     if (k === 'p') document.body.classList.toggle('present');
     else if (k === 'escape') document.body.classList.remove('present');
+    else if (view === 'live' && S.current === 'rapid' && S.rounds.rapid.status === 'live' && S.buzz && 'cwn'.includes(k) && k) {
+      const a = { c: 'right', w: 'wrong', n: 'next' }[k];
+      if ((a === 'next') === (S.buzz.phase !== 'answering')) api('buzzer', { action: a });
+    }
     else if (k === 'j') go('join'); else if (k === 'r') go('rounds'); else if (k === 'l') go('live'); else if (k === 'b') go('board');
   });
 
@@ -349,8 +353,10 @@
           <div class="timer"><div class="eyebrow">Right · Wrong · Others</div><div class="mono" style="font-size:28px;font-weight:800;margin-top:6px">−${S.settings.rapidCorrect}s · +${S.settings.rapidWrong}s · −${S.settings.rapidOthers}s</div></div>
         </div>
         <div class="bz-q" id="bz-q"></div>
+        <div class="bz-key" id="bz-key"></div>
         <div class="bz-status" id="bz-st"></div>
-        <div class="btns ctl" id="bz-ctl"></div>
+        <div class="btns" id="bz-ctl"></div>
+        <div class="bz-keys ctl">Keys: <b>C</b> correct · <b>W</b> wrong · <b>N</b> next question</div>
         <div class="bz-scores" id="bz-sc"></div>`;
       stage.querySelector('#bz-ctl').onclick = async e => {
         const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
@@ -358,6 +364,7 @@
         else if (a === 'board') go('board');
         else if (a === 'lobby') api('close-round');
         else if (a === 'rounds') { await api('close-round'); go('rounds'); }
+        else if (a === 'peek') { try { localStorage.mg_peek = localStorage.mg_peek === '1' ? '0' : '1'; } catch (e) {} render(); }
         else api('buzzer', { action: a });
       };
       cancelAnimationFrame(buzzRaf);
@@ -366,7 +373,7 @@
         if (bar && S.buzz && S.buzz.phase === 'answering') {
           const left = Math.max(0, (S.buzz.deadline - now()) / 1000);
           bar.style.transform = `scaleX(${left / S.buzz.answerSecs})`;
-          const t = document.getElementById('bz-left'); if (t) t.textContent = Math.ceil(left) + 's';
+          const t = document.getElementById('bz-left'); if (t) t.textContent = left > 0 ? Math.ceil(left) + 's' : 'Time!';
         }
         buzzRaf = requestAnimationFrame(tick);
       };
@@ -378,20 +385,25 @@
     document.getElementById('bz-q').innerHTML = phase === 'idle' ? '<span class="dim">Teams: get your buzzer finger ready.</span>'
       : phase === 'over' ? '<span class="dim">That was the last question!</span>' : esc(b.question);
     let st = '';
-    const last = b && b.last && b.last.type === 'wrong' && !b.last.overruled ? `<div class="bz-wrong">✗ <b>${esc(b.last.teamName)}</b> said “${esc(b.last.text)}” — ${signed(S.settings.rapidWrong)} for them, ${signed(-S.settings.rapidOthers)} for everyone else</div>` : '';
+    let peek = false; try { peek = localStorage.mg_peek === '1'; } catch (e) {}
+    document.getElementById('bz-key').innerHTML = live && peek && b && b.key && (phase === 'open' || phase === 'answering') ? `<span>Answer key</span> ${esc(b.key)}` : '';
+    const said = t => t ? ` said “${esc(t)}”` : '';
+    const last = b && b.last && b.last.type === 'wrong' && !b.last.overruled ? `<div class="bz-wrong">✗ <b>${esc(b.last.teamName)}</b>${said(b.last.text) || ' was wrong'} — ${signed(S.settings.rapidWrong)} for them, ${signed(-S.settings.rapidOthers)} for everyone else</div>` : '';
     if (!live) st = '';
     else if (phase === 'open') st = `${last}<div class="bz-open">Buzzers open!</div>`;
-    else if (phase === 'answering') st = `${last}<div class="bz-ans"><div><b>${esc(b.teamName)}</b> buzzed first!</div><div class="bz-tbar"><i id="bz-tbar"></i></div><span id="bz-left" class="mono"></span></div>`;
+    else if (phase === 'answering') st = `${last}<div class="bz-ans"><div><b>${esc(b.teamName)}</b> buzzed first — answer out loud!</div><div class="bz-tbar"><i id="bz-tbar"></i></div><span id="bz-left" class="mono"></span></div>`;
     else if (phase === 'closed') st = b.result.type === 'correct'
-      ? `<div class="bz-right">✓ <b>${esc(b.result.teamName)}</b>: “${esc(b.result.text)}” — correct! ${signed(-S.settings.rapidCorrect)}${b.result.overruled ? ' <small>(host accepted)</small>' : ''}<div class="bz-a">Answer: ${esc(b.answer)}</div></div>`
+      ? `<div class="bz-right">✓ <b>${esc(b.result.teamName)}</b>${b.result.text ? `: “${esc(b.result.text)}”` : ''} — correct! ${signed(-S.settings.rapidCorrect)}${b.result.overruled ? ' <small>(host accepted)</small>' : ''}<div class="bz-a">Answer: ${esc(b.answer)}</div></div>`
       : `${last}<div class="bz-none">${b.result.type === 'nobody' ? 'Nobody got it.' : 'Skipped.'}<div class="bz-a">Answer: ${esc(b.answer)}</div></div>`;
     document.getElementById('bz-st').innerHTML = st;
     const canAccept = b && b.last && b.last.type === 'wrong' && !b.last.overruled && b.last && phase !== 'answering' && (phase === 'open' || (phase === 'closed' && b.result.type === 'nobody'));
     document.getElementById('bz-ctl').innerHTML = live ? `
-      <button class="btn go" data-a="next" ${phase === 'answering' || phase === 'over' ? 'disabled' : ''}>${phase === 'idle' ? 'Show first question' : 'Next question →'}</button>
-      ${phase === 'open' ? '<button class="btn ghost" data-a="reveal">Reveal answer & skip</button>' : ''}
-      ${canAccept ? '<button class="btn ghost" data-a="accept">Accept last answer as correct</button>' : ''}
-      <button class="btn danger" data-a="end">End round</button>`
+      ${phase === 'answering' ? `<button class="btn go bz-judge" data-a="right">✓ Correct <small>C</small></button><button class="btn danger bz-judge" data-a="wrong">✗ Wrong <small>W</small></button>`
+        : `<button class="btn go" data-a="next" ${phase === 'over' ? 'disabled' : ''}>${phase === 'idle' ? 'Show first question' : 'Next question →'} <small>N</small></button>`}
+      ${phase === 'open' ? '<button class="btn ghost ctl" data-a="reveal">Reveal answer & skip</button>' : ''}
+      ${canAccept ? '<button class="btn ghost ctl" data-a="accept">Undo: mark last wrong as correct</button>' : ''}
+      <button class="btn ghost ctl" data-a="peek">${peek ? 'Hide' : 'Show'} answer key</button>
+      <button class="btn danger ctl" data-a="end">End round</button>`
       : `<button class="btn" data-a="board">Show leaderboard →</button><button class="btn ghost" data-a="lobby">Send players to lobby</button><button class="btn ghost" data-a="rounds">Next round</button>`;
     const scores = b ? b.scores : [];
     document.getElementById('bz-sc').innerHTML = scores.length ? scores.map((t, i) => `
@@ -440,7 +452,7 @@
     connections: 'Exactly four groups of four, easiest first (yellow, green, blue, purple). Teams get 4 mistakes.',
     strands: 'Theme, a spangram that stretches across the board, and the theme words. Total letters must be exactly <b>48</b>. The grid is generated for you — press Save again for a fresh layout.',
     krillion: 'Each prompt starts with <b>?</b>. List accepted answers by rarity: <b>surface</b> (common), <b>deep</b> (rare, earns time back), <b>abyss</b> (very rare, earns more). Small typos are forgiven.',
-    rapid: 'Buzzer round. One question per line, accepted answers after <b>|</b>, separated by <b>/</b>. Small typos are forgiven, and you can overrule a wrong call live. The first answer listed is the one shown when a question closes.',
+    rapid: 'Buzzer round. One question per line, accepted answers after <b>|</b>, separated by <b>/</b>. Teams answer out loud and you mark them Correct or Wrong. Turn on <b>Show answer key</b> only on a screen the audience can’t see. The first answer listed is the one shown when a question closes.',
     melale: 'A Poople-style word ladder. Set the <b>Target</b>, then one starting word per line (each line is a stage), with an optional label after <b>|</b>. Use <b>&gt;</b> to show fixed opening rows (e.g. <b>FMAC &gt; FACE</b>) — players start from the last one. Starting words can be made-up letters, but each move changes one letter and must be a real word. Par (the shortest ladder) is worked out for you; every step over par adds time. Teams get 3 hints per round; each plays the next word for them and adds the hint penalty (Settings).',
   };
   async function renderPuzzles(stage) {
@@ -504,7 +516,7 @@
           ${num('rapidCorrect', 'Rapid Fire: right answer', 'Seconds taken off')}
           ${num('rapidWrong', 'Rapid Fire: wrong answer', 'Seconds added to that team')}
           ${num('rapidOthers', 'Rapid Fire: others on a wrong answer', 'Seconds taken off every other team')}
-          ${num('rapidAnswer', 'Rapid Fire: time to answer', 'Seconds after buzzing')}
+          ${num('rapidAnswer', 'Rapid Fire: answer countdown', 'Seconds shown after a buzz (a guide — you decide)')}
           ${num('melaleOverPar', 'Melale: step over par', 'Per extra step beyond the shortest ladder')}
           ${num('melaleHint', 'Melale: hint', 'Per hint (3 per round)')}
         </div>

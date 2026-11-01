@@ -186,7 +186,7 @@ function adminView() {
     rounds: state.rounds,
     current: cur,
     live,
-    buzz: cur === 'rapid' && state.buzz ? buzzer.publicView(state, state.content.rapid, null) : null,
+    buzz: cur === 'rapid' && state.buzz ? buzzer.publicView(state, state.content.rapid, null, true) : null,
     leaderboard: leaderboard(),
   };
 }
