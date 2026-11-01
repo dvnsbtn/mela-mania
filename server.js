@@ -24,7 +24,7 @@ const DEFAULT_SETTINGS = {
   hangmanMiss: 30,     // running out of lives on a word
   strandsHint: 30,
   krillionPrompt: 30,  // seconds per prompt
-  krillionSkip: 10,
+  krillionSkip: 30,   // skipping or timing out on a prompt
   krillionDeep: 5,     // time credit for a rare answer
   krillionAbyss: 10,   // time credit for a very rare answer
   rapidSkip: 15,
