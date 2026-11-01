@@ -52,8 +52,10 @@ Rapid Fire is a host-paced buzzer round instead: you press **Next question** (N)
 |---|---|
 | Didn't finish / ran out of tries / time up | Time limit + 60s |
 | Hangman: run out of lives on a word | +30s, move to next word |
-| Strands: hint | +30s |
-| Krillion: skip or 30s prompt timeout | +10s |
+| Strands: hint | +45s |
+| Melale: hint (3 per round) | +30s |
+| Melale: each step over par | +5s |
+| Krillion: skip or 30s prompt timeout | +30s |
 | Krillion: rare ("deep") / very rare ("abyss") answer | −5s / −10s |
 | Rapid Fire (buzzer): right answer | −60s |
 | Rapid Fire (buzzer): wrong answer (host's call) | +10s for that team, −10s for every other team |
