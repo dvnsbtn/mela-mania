@@ -126,9 +126,10 @@
     const k = e.key.toLowerCase();
     if (k === 'p') document.body.classList.toggle('present');
     else if (k === 'escape') document.body.classList.remove('present');
-    else if (view === 'live' && S.current === 'rapid' && S.rounds.rapid.status === 'live' && S.buzz && 'cwn'.includes(k) && k) {
-      const a = { c: 'right', w: 'wrong', n: 'next' }[k];
-      if ((a === 'next') === (S.buzz.phase !== 'answering')) api('buzzer', { action: a });
+    else if (view === 'live' && S.current === 'rapid' && S.rounds.rapid.status === 'live' && S.buzz && 'cwnu'.includes(k) && k) {
+      const a = { c: 'right', w: 'wrong', n: 'next', u: 'undo' }[k];
+      if (a === 'undo') { if (S.buzz.canUndo) api('buzzer', { action: a }); }
+      else if ((a === 'next') === (S.buzz.phase !== 'answering')) api('buzzer', { action: a });
     }
     else if (k === 'j') go('join'); else if (k === 'r') go('rounds'); else if (k === 'l') go('live'); else if (k === 'b') go('board');
   });
@@ -356,7 +357,7 @@
         <div class="bz-key" id="bz-key"></div>
         <div class="bz-status" id="bz-st"></div>
         <div class="btns" id="bz-ctl"></div>
-        <div class="bz-keys ctl">Keys: <b>C</b> correct · <b>W</b> wrong · <b>N</b> next question</div>
+        <div class="bz-keys ctl">Keys: <b>C</b> correct · <b>W</b> wrong · <b>U</b> undo last call · <b>N</b> next question</div>
         <div class="bz-scores" id="bz-sc"></div>`;
       stage.querySelector('#bz-ctl').onclick = async e => {
         const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
@@ -401,7 +402,8 @@
       ${phase === 'answering' ? `<button class="btn go bz-judge" data-a="right">✓ Correct <small>C</small></button><button class="btn danger bz-judge" data-a="wrong">✗ Wrong <small>W</small></button>`
         : `<button class="btn go" data-a="next" ${phase === 'over' ? 'disabled' : ''}>${phase === 'idle' ? 'Show first question' : 'Next question →'} <small>N</small></button>`}
       ${phase === 'open' ? '<button class="btn ghost ctl" data-a="reveal">Reveal answer & skip</button>' : ''}
-      ${canAccept ? '<button class="btn ghost ctl" data-a="accept">Undo: mark last wrong as correct</button>' : ''}
+      ${b && b.canUndo ? `<button class="btn ghost" data-a="undo">↶ Undo ${b.result && b.result.type === 'correct' ? 'Correct' : 'Wrong'} for ${esc(b.undoTeam)} <small>U</small></button>`
+        : canAccept ? '<button class="btn ghost ctl" data-a="accept">Mark last wrong as correct</button>' : ''}
       <button class="btn ghost ctl" data-a="peek">${peek ? 'Hide' : 'Show'} answer key</button>
       <button class="btn danger ctl" data-a="end">End round</button>`
       : `<button class="btn" data-a="board">Show leaderboard →</button><button class="btn ghost" data-a="lobby">Send players to lobby</button><button class="btn ghost" data-a="rounds">Next round</button>`;

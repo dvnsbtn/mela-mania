@@ -46,7 +46,7 @@ Typical flow: Join screen → Rounds → Start round → (Live view) → round e
 
 Each round's time = seconds from round start to finishing + penalties − bonuses. Totals are summed across rounds.
 
-Rapid Fire is a host-paced buzzer round instead: you press **Next question** (N), the first team to buzz says its answer out loud, and you press **Correct** (C) or **Wrong** (W). The 15s countdown is only a guide. If you mark a fair answer wrong by mistake, press **Undo: mark last wrong as correct**. **Show answer key** puts the accepted answers on your console, so only turn it on where the audience can't see it.
+Rapid Fire is a host-paced buzzer round instead: you press **Next question** (N), the first team to buzz says its answer out loud, and you press **Correct** (C) or **Wrong** (W). The 15s countdown is only a guide. If you press Correct or Wrong by mistake, press **Undo** (U): the team goes back to answering and the scores return to how they were. **Show answer key** puts the accepted answers on your console, so only turn it on where the audience can't see it.
 
 | Situation | Effect (editable in Settings) |
 |---|---|
