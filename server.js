@@ -22,7 +22,7 @@ const DEFAULT_SETTINGS = {
   joinUrl: '',         // optional override for the link/QR shown on the join screen
   dnfPenalty: 60,      // added on top of the time limit if a team doesn't finish
   hangmanMiss: 30,     // running out of lives on a word
-  strandsHint: 30,
+  strandsHint: 45,
   krillionPrompt: 30,  // seconds per prompt
   krillionSkip: 30,   // skipping or timing out on a prompt
   krillionDeep: 5,     // time credit for a rare answer
